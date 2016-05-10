@@ -11,7 +11,7 @@ const readline = require('readline');
 const rl = readline.createInterface(process.stdin, process.stdout);
 rl.setPrompt('dishwasher> ');
 
-var pendingCount = 1;
+var pendingCount = 0;
 
 function describe(data) {
   if (typeof data == 'number') {
@@ -153,6 +153,7 @@ function describeOperatingMode(data) {
     case 7: return 'Download Mode';
     case 8: return 'Sensor Check Mode';
     case 9: return 'Load Activation Mode';
+    case 11: return '11 (try restarting, this usually indicates an invalid connection)'; // see 
     default: return '<unknown: ' + describe(data) + '>';
   }
 }
@@ -213,7 +214,7 @@ function describeReminders(data) {
     index += 1;
   }
   if (result.length == 0)
-    return '<no reminders>';
+    return 'no reminders';
   return result.join(', ');
 }
 
@@ -361,7 +362,6 @@ function describeCycleState(data) {
     case 8: return 'Pause';
     case 9: return 'Rinsing';
     case 10: return 'Cycle Inactive';
-    case 11: return '11 (try restarting, this usually indicates an invalid connection)'; // see 
     default: return '<unknown: ' + describe(data) + '>';
   }
 }
@@ -461,14 +461,14 @@ var numericFields = [
   'operatingMode', 'disabledFeatures', 'reminders', 'controlLock', 'cycleState'
 ];
 
-var dishwasher;
-
-function getRegistration(field) {
+function getRegistration(field, dishwasher) {
   pendingCount += 1;
+  var reportCount = 0;
   return function () {
     var timeout = setTimeout(function () {
       // console.log('timed out waiting for initial response for ' + field);
       pendingCount -= 1;
+      reportCount += 1;
       if (pendingCount == 0)
         rl.prompt();
     }, timeoutTime);
@@ -476,14 +476,16 @@ function getRegistration(field) {
     dishwasher[field].subscribe(function (value) {
       clearTimeout(timeout);
       fields[field](field, value);
-      pendingCount -= 1;
+      if (reportCount == 0)
+        pendingCount -= 1;
+      reportCount += 1;
       if (pendingCount == 0)
         rl.prompt();
     });
   };
 }
 
-function getReader(field) {
+function getReader(field, dishwasher) {
   pendingCount += 1;
   return function () {
     var timeout = setTimeout(function () {
@@ -503,26 +505,29 @@ function getReader(field) {
   };
 }
 
-var dishwasherCount = 0;
+var dishwasher;
 greenBean.connect("dishwasher", function(dw) {
-  dishwasherCount += 1;
-  if (dishwasherCount == 0)
-    return;
-  if (dishwasher != null) {
-    if (dw != dishwasher) {
-      console.log('dishwasher callback invoked multiple times; ignoring all but first');
-    } else {
-      console.log('redundant dishwasher registration');
-    }
-    return;
+  if (dishwasher == null) {
+    dw.operatingMode.read(function (value) {
+      if (value == 11) {
+        // this is a bogus object; see:
+        // https://github.com/GEMakers/gea-plugin-dishwasher/issues/6
+        // https://github.com/GEMakers/gea-plugin-dishwasher/issues/4
+        return;
+      }
+      dishwasher = dw;
+      index = 0;
+      for (var field in fields) {
+        setTimeout(getRegistration(field, dw), index * delayTime);
+        index += 1;
+      }
+      setTimeout(function () {
+        pendingCount -= 1;
+        if (pendingCount == 0)
+          rl.prompt();
+      }, index * delayTime);
+    });
   }
-  dishwasher = dw;
-  index = 0;
-  for (var field in fields) {
-    setTimeout(getRegistration(field), index * delayTime);
-    index += 1;
-  }
-  pendingCount -= 1;
 });
 
 rl.on('line', (line) => {
@@ -554,7 +559,7 @@ rl.on('line', (line) => {
       if (words.length == 1) {
         index = 0;
         for (var field in fields) {
-          setTimeout(getReader(field), index * delayTime);
+          setTimeout(getReader(field, dishwasher), index * delayTime);
           index += 1;
         }
       } else {
@@ -574,7 +579,7 @@ rl.on('line', (line) => {
             };
             console.log('Setting "' + field + '" to ' + describe(value));
             dishwasher[field].write(value);
-            setTimeout(getReader(field), delayTime);
+            setTimeout(getReader(field, dishwasher), delayTime);
           } catch (e) {
             console.log(e);
           }
@@ -615,7 +620,7 @@ rl.on('line', (line) => {
       if (words.length == 1) {
         var field = words[0];
         if (field in fields) {
-          dishwasher[field].read(getReader(field));
+          dishwasher[field].read(getReader(field, dishwasher));
         } else {
           console.log('Field not recognised: "' + field + '"\n');
         }
