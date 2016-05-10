@@ -2,7 +2,8 @@
 
 require('events').EventEmitter.prototype._maxListeners = 0;
 
-const delayTime = 1500;
+const delayTime = 1000;
+const timeoutTime = 3000;
 const keepAliveTime = -2000; // negative means disabled
 
 const greenBean = require("green-bean");
@@ -65,6 +66,57 @@ function describeCycleStatus(data) {
 
 function reportCycleStatus(name, data) {
   console.log(name + ': ' + describeCycleStatus(data));
+}
+
+function describeCycleCounts(data) {
+  if (typeof data != 'object')
+    return '<unexpected format: ' + describe(data) + '>';
+  try {
+    var result = [];
+    result.push('completed ' + data.completedCount + ' of ' + data.startedCount + ' cycles');
+    result.push('reset ' + data.resetCount + ' cycles');
+    return result.join(', ');
+  } catch (e) {
+    return '<' + e + ': ' + describe(data) + '>';
+  }
+}
+
+function reportCycleCounts(name, data) {
+  console.log(name + ': ' + describeCycleCounts(data));
+}
+
+function describeRates(data) {
+  if (typeof data != 'object')
+    return '<unexpected format: ' + describe(data) + '>';
+  try {
+    var result = [];
+    result.push('fillRate=' + data.fillRate);
+    result.push('drainRate=' + data.drainRate);
+    return result.join(', ');
+  } catch (e) {
+    return '<' + e + ': ' + describe(data) + '>';
+  }
+}
+
+function reportRates(name, data) {
+  console.log(name + ': ' + describeRates(data));
+}
+
+function describeDryDrainCounters(data) {
+  if (typeof data != 'object')
+    return '<unexpected format: ' + describe(data) + '>';
+  try {
+    var result = [];
+    result.push('dry drain failed ' + data.noDryDrainDetectedCount + ' times');
+    result.push('limit: ' + data.noDryDrainDetectedMaximumValue);
+    return result.join(', ');
+  } catch (e) {
+    return '<' + e + ': ' + describe(data) + '>';
+  }
+}
+
+function reportDryDrainCounters(name, data) {
+  console.log(name + ': ' + describeDryDrainCounters(data));
 }
 
 function describeAnalogData(data) {
@@ -134,7 +186,7 @@ function describeDisabledFeatures(data) {
     index += 1;
   }
   if (result.length == 0)
-    return '<no disabled features>';
+    return 'all features enabled';
   return result.join(', ');
 }
 
@@ -238,6 +290,63 @@ function reportControlLock(name, data) {
   console.log(name + ': ' + describeControlLock(data));
 }
 
+function describeDoorCount(data) {
+  if (typeof data != 'number')
+    return '<unexpected format: ' + describe(data) + '>';
+  return 'door opened and closed ' + data + ' times';
+}
+
+function reportDoorCount(name, data) {
+  console.log(name + ': ' + describeDoorCount(data));
+}
+
+function describePersonality(data) {
+  if (typeof data != 'object')
+    return '<unexpected format: ' + describe(data) + '>';
+  try {
+    var result = [];
+    switch (data.personality) {
+      case 0:
+      case 1:
+      case 2:
+      case 3:
+      case 4:
+      case 5:
+      case 6:
+      case 7:
+      case 8:
+      case 9:
+      case 10:
+      case 11:
+      case 12:
+      case 13:
+      case 14:
+       result.push('UI personality=' + data.personality);
+       break;
+      case 15:
+       result.push('no UI personality (UI board may be hard-wired)');
+       break;
+      default: throw 'unexpected personality';
+    }
+    switch (data.source) {
+      case 0:
+       result.push('source=Bootload Parametric');
+       break;
+      case 1:
+       result.push('source=A/D');
+       break;
+      default: throw 'unexpected source';
+    }
+    return result.join(', ');
+  } catch (e) {
+    return '<' + e + ': ' + describe(data) + '>';
+  }
+}
+
+function reportPersonality(name, data) {
+  console.log(name + ': ' + describePersonality(data));
+}
+
 function describeCycleState(data) {
   if (typeof data != 'number')
     return '<unexpected format: ' + describe(data) + '>';
@@ -252,6 +361,7 @@ function describeCycleState(data) {
     case 8: return 'Pause';
     case 9: return 'Rinsing';
     case 10: return 'Cycle Inactive';
+    case 11: return '11 (try restarting, this usually indicates an invalid connection)'; // see 
     default: return '<unknown: ' + describe(data) + '>';
   }
 }
@@ -260,29 +370,90 @@ function reportCycleState(name, data) {
   console.log(name + ': ' + describeCycleState(data));
 }
 
+function describeTime(data, includeSeconds) {
+  var seconds = data % 60;
+  var minutes = includeSeconds ? Math.floor(data / 60) % 60 : Math.round(data / 60) % 60;
+  var hours = Math.floor(data / (60 * 60)) % 24;
+  var days = Math.floor(data / (60 * 60 * 24));
+  var result = '';
+  if (days > 0)
+    result += days + 'd';
+  if (result != '' || hours > 0) {
+    if (result != '')
+      result += ' ';
+    result += hours + 'h';
+  }
+  if (result != '' || minutes > 0) {
+    if (result != '')
+      result += ' ';
+    result += minutes + 'm';
+  }
+  if (includeSeconds && (result != '' || seconds > 0)) {
+    if (result != '')
+      result += ' ';
+    result += seconds + 's';
+  }
+  return result;
+}
+
+function describeTemp(data) { // data is in fahrenheit
+  return ((data - 32) * 5 / 9).toFixed(1) + '℃';
+}
+
+function describeCycleData(data) {
+  if (typeof data != 'object')
+    return '<unexpected format: ' + describe(data) + '>';
+  try {
+    var result = [];
+    result.push('number=' + data.cycleNumber);
+    result.push('temp=' + describeTemp(data.cycleMinimumTemperatureInFahrenheit) + '..' + describeTemp(data.cycleMaximumTemperatureInFahrenheit));
+    result.push('finalTemp=' + describeTemp(data.cycleFinalCirculationTemperatureInFahrenheit));
+    result.push('turbidity=' + data.cycleMinimumTurbidityInNTU + '..' + data.cycleMaximumTurbidityInNTU + ' NTU');
+    result.push('duration=' + (describeTime(data.cycleDurationInMinutes * 60, false)));
+    result.push('time=' + data.cycleTime);
+    switch (data.cycleCompleted) {
+      case 0: result.push('incomplete'); break;
+      case 1: result.push('completed'); break;
+      default: result.push('completed=<unrecognized value ' + describe(data.cycleCompleted) + '>'); break;
+    }
+    return result.join(', ');
+  } catch (e) {
+    return '<' + e + ': ' + describe(data) + '>';
+  }
+  return describe(data);
+}
+
+function reportCycleData(name, data) {
+  console.log(name + ': ' + describeCycleData(data));
+}
+
 var fields = {
-  'cycleStatus': reportCycleStatus,
   'operatingMode': reportOperatingMode,
-  'disabledFeatures': reportDisabledFeatures,
+  'cycleState': reportCycleState,
+  'cycleStatus': reportCycleStatus,
+  'cycleData0': reportCycleData,
+  'cycleData1': reportCycleData,
+  'cycleData2': reportCycleData,
+  'cycleData3': reportCycleData,
+  'cycleData4': reportCycleData,
+  'cycleCounts': reportCycleCounts,
   'reminders': reportReminders,
-  'rates': report,
-  // ' turbidityCalibration': report,
-  'doorCount': report,
-  'userConfiguration': reportUserConfiguration,
+
+  'analogData': reportAnalogData,
+  'disabledFeatures': reportDisabledFeatures,
+  'rates': reportRates,
+
   'error': report,
-  'cycleCounts': report,
   'continuousCycle': report,
   'controlLock': reportControlLock,
-  'personality': report,
+  'personality': reportPersonality,
+
+  'dryDrainCounters': reportDryDrainCounters,
+  'userConfiguration': reportUserConfiguration,
+  'doorCount': reportDoorCount,
+  // the following are documented but fail on the GDF570SGFWW or with this SDK (not clear which)
+  // 'turbidityCalibration': report,
   // 'diverterCalibration': report,
-  'cycleState': reportCycleState,
-  'analogData': reportAnalogData,
-  'cycleData0': report,
-  'cycleData1': report,
-  'cycleData2': report,
-  'cycleData3': report,
-  'cycleData4': report,
-  'dryDrainCounters': report,
   // 'tubLight': report,
 };
 
@@ -295,11 +466,20 @@ var dishwasher;
 function getRegistration(field) {
   pendingCount += 1;
   return function () {
-    // console.log('registering listener for ' + field);
-    dishwasher[field].subscribe(function (data) { fields[field](field, data); });
-    pendingCount -= 1;
-    if (pendingCount == 0)
-      rl.prompt();
+    var timeout = setTimeout(function () {
+      // console.log('timed out waiting for initial response for ' + field);
+      pendingCount -= 1;
+      if (pendingCount == 0)
+        rl.prompt();
+    }, timeoutTime);
+    timeout.unref();
+    dishwasher[field].subscribe(function (value) {
+      clearTimeout(timeout);
+      fields[field](field, value);
+      pendingCount -= 1;
+      if (pendingCount == 0)
+        rl.prompt();
+    });
   };
 }
 
@@ -311,7 +491,7 @@ function getReader(field) {
       pendingCount -= 1;
       if (pendingCount == 0)
         rl.prompt();
-    }, delayTime);
+    }, timeoutTime);
     timeout.unref();
     dishwasher[field].read(function (value) {
       clearTimeout(timeout);
@@ -435,7 +615,7 @@ rl.on('line', (line) => {
       if (words.length == 1) {
         var field = words[0];
         if (field in fields) {
-          dishwasher[field].read(function (data) { fields[field](field, data); });
+          dishwasher[field].read(getReader(field));
         } else {
           console.log('Field not recognised: "' + field + '"\n');
         }
