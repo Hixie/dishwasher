@@ -2,6 +2,7 @@
 
 require('events').EventEmitter.prototype._maxListeners = 0;
 
+const dishwasherEpoch = 1462467660000;
 const delayTime = 1000;
 const timeoutTime = 3000;
 const keepAliveTime = -2000; // negative means disabled
@@ -11,7 +12,7 @@ const readline = require('readline');
 const rl = readline.createInterface(process.stdin, process.stdout);
 rl.setPrompt('dishwasher> ');
 
-var pendingCount = 0;
+var pendingCount = 1;
 
 function describe(data) {
   if (typeof data == 'number') {
@@ -51,6 +52,7 @@ function describeCycleStatus(data) {
     switch (data.cycleRunning) {
       case 0: result.push('inactive'); break;
       case 1: result.push('active'); break;
+      case 3: result.push('unknown cycleRunning (3)'); break;
       default: throw 'unexpected cycleRunning';
     }
     result.push('activeCycle=' + data.activeCycle);
@@ -232,7 +234,8 @@ function describeUserConfiguration(data) {
     case 2: result.push('Delay Start: 4h'); break;
     case 3: result.push('Delay Start: 8h'); break;
   }
-  result.push('Zone: ' + ((data[0] & 0x30) >> 4));
+  if (data[0] & 0x30)
+    result.push('Zone: ' + ((data[0] & 0x30) >> 4));
   if (data[0] & 0x40)
     result.push('Demo Mode');
   if (data[0] & 0x80)
@@ -383,12 +386,12 @@ function describeTime(data, includeSeconds) {
       result += ' ';
     result += hours + 'h';
   }
-  if (result != '' || minutes > 0) {
+  if (result != '' || minutes > 0 || !includeSeconds) {
     if (result != '')
       result += ' ';
     result += minutes + 'm';
   }
-  if (includeSeconds && (result != '' || seconds > 0)) {
+  if (includeSeconds) {
     if (result != '')
       result += ' ';
     result += seconds + 's';
@@ -400,42 +403,98 @@ function describeTemp(data) { // data is in fahrenheit
   return ((data - 32) * 5 / 9).toFixed(1) + '℃';
 }
 
+function pad(value, padding) {
+  return padding.substring(0, padding.length - value.length) + value;
+}
+
+function describeTimestamp(data) { // seconds since dishwasher epoch
+  var date = new Date(data * 1000 + dishwasherEpoch);
+  var year = date.getUTCFullYear();
+  var month = pad((date.getUTCMonth() + 1).toString(), '00');
+  var day = pad((date.getUTCDate()).toString(), '00');
+  var hour = pad(date.getUTCHours().toString(), '00');
+  var minute = pad(date.getUTCMinutes().toString(), '00');
+  return 'on ' + year + '-' + month + '-' + day + ' at ' + hour + ':' + minute;
+}
+
 function describeCycleData(data) {
   if (typeof data != 'object')
     return '<unexpected format: ' + describe(data) + '>';
   try {
     var result = [];
-    result.push('number=' + data.cycleNumber);
-    result.push('temp=' + describeTemp(data.cycleMinimumTemperatureInFahrenheit) + '..' + describeTemp(data.cycleMaximumTemperatureInFahrenheit));
-    result.push('finalTemp=' + describeTemp(data.cycleFinalCirculationTemperatureInFahrenheit));
-    result.push('turbidity=' + data.cycleMinimumTurbidityInNTU + '..' + data.cycleMaximumTurbidityInNTU + ' NTU');
-    result.push('duration=' + (describeTime(data.cycleDurationInMinutes * 60, false)));
-    result.push('time=' + data.cycleTime);
+    if (data.cycleNumber != 0)
+      result.push('number=' + data.cycleNumber);
+    if ((data.cycleMinimumTemperatureInFahrenheit == 255) &&
+        (data.cycleMaximumTemperatureInFahrenheit == 0)) {
+      result.push('no temperature data yet');
+    } else {
+      result.push('temp=' + describeTemp(data.cycleMinimumTemperatureInFahrenheit) + '..' + describeTemp(data.cycleMaximumTemperatureInFahrenheit));
+    }
+    if (data.cycleFinalCirculationTemperatureInFahrenheit != 0)
+      result.push('finalTemp=' + describeTemp(data.cycleFinalCirculationTemperatureInFahrenheit));
+    if ((data.cycleMinimumTurbidityInNTU == 65535) &&
+        (data.cycleMaximumTurbidityInNTU == 0)) {
+      result.push('no turbidity data yet');
+    } else {
+      result.push('turbidity=' + data.cycleMinimumTurbidityInNTU + '..' + data.cycleMaximumTurbidityInNTU + ' NTU');
+    }
+    result.push('started ' + describeTimestamp(data.cycleTime * 60));
     switch (data.cycleCompleted) {
       case 0: result.push('incomplete'); break;
-      case 1: result.push('completed'); break;
+      case 1: result.push('completed ' + describeTimestamp(data.cycleTime * 60 + data.cycleDurationInMinutes * 60)); break;
       default: result.push('completed=<unrecognized value ' + describe(data.cycleCompleted) + '>'); break;
     }
+    result.push('duration=' + (describeTime(data.cycleDurationInMinutes * 60, false)));
     return result.join(', ');
   } catch (e) {
     return '<' + e + ': ' + describe(data) + '>';
   }
-  return describe(data);
 }
 
 function reportCycleData(name, data) {
   console.log(name + ': ' + describeCycleData(data));
 }
 
+function describeContinuousCycle(data) {
+  if (typeof data != 'object')
+    return '<unexpected format: ' + describe(data) + '>';
+  try {
+    var result = [];
+    result.push('cycle number ' + data.cycleToRun);
+    result.push('' + data.cyclesRemaining + ' cycles remaining');
+    result.push('' + describeTime(data.cyclesRemaining, false) + ' between cycles');
+    return result.join(', ');
+  } catch (e) {
+    return '<' + e + ': ' + describe(data) + '>';
+  }
+}
+
+function reportContinuousCycle(name, data) {
+  console.log(name + ': ' + describeContinuousCycle(data));
+}
+
+function describeError(data) {
+  if (typeof data != 'object')
+    return '<unexpected format: ' + describe(data) + '>';
+  try {
+    if (data.errorState == 0) {
+      return 'cleared (was error ' + data.errorId + ')';
+    } else {
+      return 'error ' + data.errorId + '; state ' + data.errorState;
+    }
+  } catch (e) {
+    return '<' + e + ': ' + describe(data) + '>';
+  }
+}
+
+function reportError(name, data) {
+  console.log(name + ': ' + describeError(data));
+}
+
 var fields = {
   'operatingMode': reportOperatingMode,
   'cycleState': reportCycleState,
   'cycleStatus': reportCycleStatus,
-  'cycleData0': reportCycleData,
-  'cycleData1': reportCycleData,
-  'cycleData2': reportCycleData,
-  'cycleData3': reportCycleData,
-  'cycleData4': reportCycleData,
   'cycleCounts': reportCycleCounts,
   'reminders': reportReminders,
 
@@ -443,11 +502,16 @@ var fields = {
   'disabledFeatures': reportDisabledFeatures,
   'rates': reportRates,
 
-  'error': report,
-  'continuousCycle': report,
+  'error': reportError,
+  'continuousCycle': reportContinuousCycle,
   'controlLock': reportControlLock,
   'personality': reportPersonality,
 
+  'cycleData0': reportCycleData,
+  'cycleData1': reportCycleData,
+  'cycleData2': reportCycleData,
+  'cycleData3': reportCycleData,
+  'cycleData4': reportCycleData,
   'dryDrainCounters': reportDryDrainCounters,
   'userConfiguration': reportUserConfiguration,
   'doorCount': reportDoorCount,
@@ -629,6 +693,7 @@ rl.on('line', (line) => {
       }
       break;
   }
+  // console.log('pendingCount = ' + pendingCount);
   if (pendingCount == 0)
     rl.prompt();
 }).on('close', () => {
