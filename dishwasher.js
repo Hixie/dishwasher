@@ -1,10 +1,13 @@
 // This has only been tested with a GE GDF570SGFWW dishwasher
 
+// This is a stand-alone script that provides a little interface to
+// the dishwasher. It tries to interpret messages and print them.
+
 require('events').EventEmitter.prototype._maxListeners = 0;
 
-const dishwasherEpoch = 1462467660000;
-const delayTime = 1000;
-const timeoutTime = 3000;
+const dishwasherEpoch = 1462569778000;
+const delayTime = 500;
+const timeoutTime = 10000;
 const keepAliveTime = -2000; // negative means disabled
 
 const greenBean = require("green-bean");
@@ -13,6 +16,19 @@ const rl = readline.createInterface(process.stdin, process.stdout);
 rl.setPrompt('dishwasher> ');
 
 var pendingCount = 1;
+
+function log(s) {
+  var date = new Date();
+  var year = date.getFullYear();
+  var month = pad((date.getMonth() + 1).toString(), '00');
+  var day = pad((date.getDate()).toString(), '00');
+  var hour = pad(date.getHours().toString(), '00');
+  var minute = pad(date.getMinutes().toString(), '00');
+  var second = pad(date.getSeconds().toString(), '00');
+  var timestamp = ''+ year + '-' + month + '-' + day + ' ' + hour + ':' + minute + ':' + second;
+  console.log(timestamp + '| ' + s);
+}
+
 
 function describe(data) {
   if (typeof data == 'number') {
@@ -38,8 +54,8 @@ function describe(data) {
 
 function report(name, data) {
   if (pendingCount == 0)
-    console.log('');
-  console.log(name + ': ' + describe(data));
+    log('');
+  log(name + ': ' + describe(data));
   if (pendingCount == 0)
     rl.prompt(true);
 }
@@ -51,9 +67,11 @@ function describeCycleStatus(data) {
     var result = [];
     switch (data.cycleRunning) {
       case 0: result.push('inactive'); break;
-      case 1: result.push('active'); break;
-      case 3: result.push('unknown cycleRunning (3)'); break;
-      default: throw 'unexpected cycleRunning';
+      case 1: result.push('autosense'); break;
+      case 3: result.push('heavy'); break;
+      case 6: result.push('normal'); break;
+      case 11: result.push('light'); break;
+      default: result.push('cycleRunning=' + data.cycleRunning);
     }
     result.push('activeCycle=' + data.activeCycle);
     result.push('activeCycleStep=' + data.activeCycleStep);
@@ -67,7 +85,7 @@ function describeCycleStatus(data) {
 }
 
 function reportCycleStatus(name, data) {
-  console.log(name + ': ' + describeCycleStatus(data));
+  log(name + ': ' + describeCycleStatus(data));
 }
 
 function describeCycleCounts(data) {
@@ -84,7 +102,7 @@ function describeCycleCounts(data) {
 }
 
 function reportCycleCounts(name, data) {
-  console.log(name + ': ' + describeCycleCounts(data));
+  log(name + ': ' + describeCycleCounts(data));
 }
 
 function describeRates(data) {
@@ -101,7 +119,7 @@ function describeRates(data) {
 }
 
 function reportRates(name, data) {
-  console.log(name + ': ' + describeRates(data));
+  log(name + ': ' + describeRates(data));
 }
 
 function describeDryDrainCounters(data) {
@@ -118,7 +136,7 @@ function describeDryDrainCounters(data) {
 }
 
 function reportDryDrainCounters(name, data) {
-  console.log(name + ': ' + describeDryDrainCounters(data));
+  log(name + ': ' + describeDryDrainCounters(data));
 }
 
 function describeAnalogData(data) {
@@ -138,7 +156,7 @@ function describeAnalogData(data) {
 }
 
 function reportAnalogData(name, data) {
-  console.log(name + ': ' + describeAnalogData(data));
+  log(name + ': ' + describeAnalogData(data));
 }
 
 function describeOperatingMode(data) {
@@ -161,7 +179,7 @@ function describeOperatingMode(data) {
 }
 
 function reportOperatingMode(name, data) {
-  console.log(name + ': ' + describeOperatingMode(data));
+  log(name + ': ' + describeOperatingMode(data));
 }
 
 function describeDisabledFeatures(data) {
@@ -194,7 +212,7 @@ function describeDisabledFeatures(data) {
 }
 
 function reportDisabledFeatures(name, data) {
-  console.log(name + ': ' + describeDisabledFeatures(data));
+  log(name + ': ' + describeDisabledFeatures(data));
 }
 
 function describeReminders(data) {
@@ -221,7 +239,7 @@ function describeReminders(data) {
 }
 
 function reportReminders(name, data) {
-  console.log(name + ': ' + describeReminders(data));
+  log(name + ': ' + describeReminders(data));
 }
 
 function describeUserConfiguration(data) {
@@ -279,7 +297,7 @@ function describeUserConfiguration(data) {
 }
 
 function reportUserConfiguration(name, data) {
-  console.log(name + ': ' + describeUserConfiguration(data));
+  log(name + ': ' + describeUserConfiguration(data));
 }
 
 function describeControlLock(data) {
@@ -291,7 +309,7 @@ function describeControlLock(data) {
 }
 
 function reportControlLock(name, data) {
-  console.log(name + ': ' + describeControlLock(data));
+  log(name + ': ' + describeControlLock(data));
 }
 
 function describeDoorCount(data) {
@@ -301,7 +319,7 @@ function describeDoorCount(data) {
 }
 
 function reportDoorCount(name, data) {
-  console.log(name + ': ' + describeDoorCount(data));
+  log(name + ': ' + describeDoorCount(data));
 }
 
 function describePersonality(data) {
@@ -348,7 +366,7 @@ function describePersonality(data) {
 }
 
 function reportPersonality(name, data) {
-  console.log(name + ': ' + describePersonality(data));
+  log(name + ': ' + describePersonality(data));
 }
 
 function describeCycleState(data) {
@@ -370,7 +388,7 @@ function describeCycleState(data) {
 }
 
 function reportCycleState(name, data) {
-  console.log(name + ': ' + describeCycleState(data));
+  log(name + ': ' + describeCycleState(data));
 }
 
 function describeTime(data, includeSeconds) {
@@ -452,7 +470,43 @@ function describeCycleData(data) {
 }
 
 function reportCycleData(name, data) {
-  console.log(name + ': ' + describeCycleData(data));
+  log(name + ': ' + describeCycleData(data));
+}
+
+function describeContinuousCycle(data) {
+  if (typeof data != 'object')
+    return '<unexpected format: ' + describe(data) + '>';
+  try {
+    var result = [];
+    result.push('cycle number ' + data.cycleToRun);
+    result.push('' + data.cyclesRemaining + ' cycles remaining');
+    result.push('' + describeTime(data.cyclesRemaining, false) + ' between cycles');
+    return result.join(', ');
+  } catch (e) {
+    return '<' + e + ': ' + describe(data) + '>';
+  }
+}
+
+function reportContinuousCycle(name, data) {
+  log(name + ': ' + describeContinuousCycle(data));
+}
+
+function describeError(data) {
+  if (typeof data != 'object')
+    return '<unexpected format: ' + describe(data) + '>';
+  try {
+    if (data.errorState == 0) {
+      return 'cleared (was error ' + data.errorId + ')';
+    } else {
+      return 'error ' + data.errorId + '; state ' + data.errorState;
+    }
+  } catch (e) {
+    return '<' + e + ': ' + describe(data) + '>';
+  }
+}
+
+function reportError(name, data) {
+  log(name + ': ' + describeError(data));
 }
 
 function describeContinuousCycle(data) {
@@ -492,29 +546,36 @@ function reportError(name, data) {
 }
 
 var fields = {
+  // only the first nine of these to which any program subscribes after power cycle will send change updates
+  'userConfiguration': reportUserConfiguration,
   'operatingMode': reportOperatingMode,
   'cycleState': reportCycleState,
   'cycleStatus': reportCycleStatus,
-  'cycleCounts': reportCycleCounts,
-  'reminders': reportReminders,
+  'doorCount': reportDoorCount,
 
-  'analogData': reportAnalogData,
-  'disabledFeatures': reportDisabledFeatures,
-  'rates': reportRates,
-
-  'error': reportError,
-  'continuousCycle': reportContinuousCycle,
-  'controlLock': reportControlLock,
-  'personality': reportPersonality,
-
+  // status ring buffer
   'cycleData0': reportCycleData,
   'cycleData1': reportCycleData,
   'cycleData2': reportCycleData,
   'cycleData3': reportCycleData,
   'cycleData4': reportCycleData,
-  'dryDrainCounters': reportDryDrainCounters,
-  'userConfiguration': reportUserConfiguration,
-  'doorCount': reportDoorCount,
+
+  'reminders': reportReminders, // this is unreliable at best, and can be polled at worst
+
+  'cycleCounts': reportCycleCounts, // not clear how useful this really is
+
+  'error': reportError, // ???
+  'rates': reportRates, // ???
+  'continuousCycle': reportContinuousCycle, // ???
+
+  'analogData': reportAnalogData, // sends lots of bogus data continuously
+  'dryDrainCounters': reportDryDrainCounters, // sends updates continuously despite no change
+
+  'personality': reportPersonality, // never changes
+  'disabledFeatures': reportDisabledFeatures, // never changes?
+
+  'controlLock': reportControlLock, // ???
+
   // the following are documented but fail on the GDF570SGFWW or with this SDK (not clear which)
   // 'turbidityCalibration': report,
   // 'diverterCalibration': report,
@@ -530,7 +591,7 @@ function getRegistration(field, dishwasher) {
   var reportCount = 0;
   return function () {
     var timeout = setTimeout(function () {
-      // console.log('timed out waiting for initial response for ' + field);
+      // log('timed out waiting for initial response for ' + field);
       pendingCount -= 1;
       reportCount += 1;
       if (pendingCount == 0)
@@ -553,7 +614,7 @@ function getReader(field, dishwasher) {
   pendingCount += 1;
   return function () {
     var timeout = setTimeout(function () {
-      console.log('timed out waiting for response for ' + field);
+      log('timed out waiting for response for ' + field);
       pendingCount -= 1;
       if (pendingCount == 0)
         rl.prompt();
@@ -582,7 +643,8 @@ greenBean.connect("dishwasher", function(dw) {
       dishwasher = dw;
       index = 0;
       for (var field in fields) {
-        setTimeout(getRegistration(field, dw), index * delayTime);
+        setTimeout(getReader(field, dw), index * delayTime);
+        setTimeout(getRegistration(field, dw), index * delayTime + delayTime / 2);
         index += 1;
       }
       setTimeout(function () {
@@ -600,21 +662,21 @@ rl.on('line', (line) => {
     case '':
       break;
     case 'help':
-      console.log('commands:');
-      console.log('  <field>: read the field');
-      console.log('  raw <field>: read the field and display raw data');
-      console.log('  all: read all fields');
-      console.log('  available fields are:');
+      log('commands:');
+      log('  <field>: read the field');
+      log('  raw <field>: read the field and display raw data');
+      log('  all: read all fields');
+      log('  available fields are:');
       for (var field in fields) {
         if (field in dishwasher)
-          console.log('    ' + field);
+          log('    ' + field);
       }
       for (var index = 0; index < numericFields.length; index += 1) {
         var field = numericFields[index];
-        console.log('  set ' + field + ' <n>: set this field to <n>');
+        log('  set ' + field + ' <n>: set this field to <n>');
       }
-      console.log('  set personality <personality> <source>: set personality to <personality> with <source>');
-      console.log('');
+      log('  set personality <personality> <source>: set personality to <personality> with <source>');
+      log('');
       break;
     case 'sensors':
       dishwasher.analogData.read(reportAnalogData);
@@ -627,7 +689,7 @@ rl.on('line', (line) => {
           index += 1;
         }
       } else {
-        console.log('Command not recognised: "' + line + '" (' + words.length + ' words)\n');
+        log('Command not recognised: "' + line + '" (' + words.length + ' words)\n');
       }
       break;
     case 'set':
@@ -641,14 +703,14 @@ rl.on('line', (line) => {
               personality: personality,
               source: source
             };
-            console.log('Setting "' + field + '" to ' + describe(value));
+            log('Setting "' + field + '" to ' + describe(value));
             dishwasher[field].write(value);
             setTimeout(getReader(field, dishwasher), delayTime);
           } catch (e) {
-            console.log(e);
+            log(e);
           }
         } else {
-          console.log('syntax: set personality <personality> <source>');
+          log('syntax: set personality <personality> <source>');
         }
         break;
       } if (words.length == 3) {
@@ -656,16 +718,16 @@ rl.on('line', (line) => {
         if (numericFields.indexOf(field) >= 0) {
           try {
             var value = parseInt(words[2]);
-            console.log('Setting "' + field + '" to ' + value);
+            log('Setting "' + field + '" to ' + value);
             dishwasher[field].write(value);
           } catch (e) {
-            console.log(e);
+            log(e);
           }
         } else {
-          console.log('Field not recognised: "' + field + '"\n');
+          log('Field not recognised: "' + field + '"\n');
         }
       } else {
-        console.log('Command not recognised: "' + line + '" (' + words.length + ' words)\n');
+        log('Command not recognised: "' + line + '" (' + words.length + ' words)\n');
       }
       break;
     case 'raw':
@@ -674,10 +736,10 @@ rl.on('line', (line) => {
         if (field in fields) {
           dishwasher[field].read(function (data) { report(field, data); });
         } else {
-          console.log('Field not recognised: "' + field + '"\n');
+          log('Field not recognised: "' + field + '"\n');
         }
       } else {
-        console.log('Command not recognised: "' + line + '" (' + words.length + ' words)\n');
+        log('Command not recognised: "' + line + '" (' + words.length + ' words)\n');
       }
       break;
     default:
@@ -686,18 +748,18 @@ rl.on('line', (line) => {
         if (field in fields) {
           dishwasher[field].read(getReader(field, dishwasher));
         } else {
-          console.log('Field not recognised: "' + field + '"\n');
+          log('Field not recognised: "' + field + '"\n');
         }
       } else {
-        console.log('Command not recognised: "' + line + '" (' + words.length + ' words)\n');
+        log('Command not recognised: "' + line + '" (' + words.length + ' words)\n');
       }
       break;
   }
-  // console.log('pendingCount = ' + pendingCount);
+  // log('pendingCount = ' + pendingCount);
   if (pendingCount == 0)
     rl.prompt();
 }).on('close', () => {
-  console.log('Terminating dishwasher console.');
+  log('Terminating dishwasher console.');
   process.exit(0);
 });
 
