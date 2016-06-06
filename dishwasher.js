@@ -29,7 +29,6 @@ function log(s) {
   console.log(timestamp + '| ' + s);
 }
 
-
 function describe(data) {
   if (typeof data == 'number') {
     if (data != 0)
