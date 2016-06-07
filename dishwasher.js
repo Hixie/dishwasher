@@ -172,7 +172,7 @@ function describeOperatingMode(data) {
     case 7: return 'Download Mode';
     case 8: return 'Sensor Check Mode';
     case 9: return 'Load Activation Mode';
-    case 11: return '11 (try restarting, this usually indicates an invalid connection)'; // see 
+    case 11: return '11 (try restarting, this usually indicates an invalid connection)'; // see https://github.com/GEMakers/gea-plugin-dishwasher/issues/4
     default: return '<unknown: ' + describe(data) + '>';
   }
 }
