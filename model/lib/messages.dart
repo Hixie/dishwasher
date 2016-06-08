@@ -143,7 +143,7 @@ class CycleDataHandler extends MessageHandler {
   }
 }
 
-abstract class EnumHandler<T> extends MessageHandler {
+abstract class IntHandler<T> extends MessageHandler {
   void parse(DateTime stamp, String data) {
     dynamic decodedData = JSON.decode(data);
     verify(decodedData is int);
@@ -154,7 +154,7 @@ abstract class EnumHandler<T> extends MessageHandler {
   void setValue(T value);
 }
 
-class OperatingModeHandler extends EnumHandler<OperatingMode> {
+class OperatingModeHandler extends IntHandler<OperatingMode> {
   @override
   OperatingMode parseValue(int value) {
     switch (value) {
@@ -179,7 +179,7 @@ class OperatingModeHandler extends EnumHandler<OperatingMode> {
   }
 }
 
-class CycleStateHandler extends EnumHandler<CycleState> {
+class CycleStateHandler extends IntHandler<CycleState> {
   @override
   CycleState parseValue(int value) {
     switch (value) {
@@ -192,7 +192,7 @@ class CycleStateHandler extends EnumHandler<CycleState> {
       case 7: return CycleState.diverterCalibration;
       case 8: return CycleState.pause;
       case 9: return CycleState.rinsing;
-      case 10: return CycleState.cycleInactive;
+      case 10: return CycleState.none;
       default: parseFail(); return null;
     }
   }
@@ -203,19 +203,65 @@ class CycleStateHandler extends EnumHandler<CycleState> {
   }
 }
 
-class CycleStatusHandler extends IgnoredMessageHandler { }
-class DoorCountHandler extends IgnoredMessageHandler { }
+class CycleStatusHandler extends MessageHandler {
+  void parse(DateTime stamp, String data) {
+    dynamic decodedData = JSON.decode(data);
+    verify(decodedData is Map<dynamic, dynamic>, 'cycleStatus data not a map');
+    verify(decodedData['cycleRunning'] is int, 'cycleStatus.cycleRunning not a number');
+    verify(decodedData['activeCycle'] is int, 'cycleStatus.activeCycle not a number');
+    verify(decodedData['activeCycleStep'] is int, 'cycleStatus.activeCycleStep not a number');
+    verify(decodedData['stepsExecuted'] is int, 'cycleStatus.stepsExecuted not a number');
+    verify(decodedData['stepsEstimated'] is int, 'cycleStatus.stepsEstimated not a number');
+    verify(decodedData['activeCycleStep'] < (1 << kCycle));
+    dishwasher.cycleSelection = parseCycleRunning(decodedData['cycleRunning']);
+    dishwasher.cycleStep = (decodedData['activeCycle'] << kCycle) + decodedData['activeCycleStep'];
+    dishwasher.stepsExecuted = decodedData['stepsExecuted'];
+    dishwasher.stepsEstimated = decodedData['stepsEstimated'];
+  }
+
+  CycleSelection parseCycleRunning(int value) {
+    switch (value) {
+      case 0: return CycleSelection.none;
+      case 1: return CycleSelection.autosense;
+      case 3: return CycleSelection.heavy;
+      case 6: return CycleSelection.normal;
+      case 11: return CycleSelection.light;
+      default: parseFail(); return null;
+    }
+  }
+}
+
+class DoorCountHandler extends IntHandler<int> {
+  @override
+  int parseValue(int value) => value;
+
+  @override
+  void setValue(int value) {
+    dishwasher.doorCount = value;
+  }
+}
+
 class RemindersHandler extends IgnoredMessageHandler { }
 class CycleCountsHandler extends IgnoredMessageHandler { }
 class ErrorsHandler extends IgnoredMessageHandler { }
 class RatesHandler extends IgnoredMessageHandler { }
 class ContinuousCycleHandler extends IgnoredMessageHandler { }
-class AnalogDataHandler extends IgnoredMessageHandler { }
+
+class AnalogDataHandler extends MessageHandler {
+  void parse(DateTime stamp, String data) {
+    dynamic decodedData = JSON.decode(data);
+    verify(decodedData is List<dynamic>, 'analog data data not a list');
+    verify(decodedData.length == 12, 'analog data data not a list of twelve values');
+    verify(!decodedData.any((dynamic value) => !isByte(value)), 'analog data data not a list of twelve bytes');
+    dishwasher.sensors = decodedData.map/*<int>*/((dynamic data) => data);
+  }
+}
+
 class DryDrainCountersHandler extends IgnoredMessageHandler { }
 class PersonalityHandler extends IgnoredMessageHandler { }
 class DisabledFeaturesHandler extends IgnoredMessageHandler { }
 
-class ControlLockHandler extends EnumHandler<bool> {
+class ControlLockHandler extends IntHandler<bool> {
   @override
   bool parseValue(int value) {
     switch (value) {

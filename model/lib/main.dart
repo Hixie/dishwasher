@@ -20,8 +20,8 @@ void handleWebSocketMessage(dynamic message) {
     MessageHandler handler = handlers[parts[1]] ?? new DefaultHandler(parts[1]);
     handler.parse(stamp, parts[2]);
   } catch (e) {
-    print('$stamp   $parts[1]  $parts[2]');
-    print('unable to parse: $e');
+    print('$stamp   ${parts[1]}  ${parts[2]}');
+    print('${ " " * stamp.toString().length }   unable to parse: $e');
   }
   if (staleness.elapsed > kMaxStaleness) {
     dirtyTimer?.cancel();
