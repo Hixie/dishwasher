@@ -11,6 +11,8 @@ bool isBit(dynamic value) => value is int && value >= 0 && value <= 1;
 bool isByte(dynamic value) => value is int && value >= 0 && value <= 255;
 bool isWord(dynamic value) => value is int && value >= 0 && value <= 65536;
 
+// ABSTRACT HANDLERS
+
 abstract class MessageHandler {
   String get name => runtimeType.toString();
   void parse(DateTime stamp, String data);
@@ -24,6 +26,39 @@ abstract class IgnoredMessageHandler extends MessageHandler {
     print('$stamp   ignoring field "$name": $data');
   }
 }
+
+abstract class IntHandler<T> extends MessageHandler {
+  void parse(DateTime stamp, String data) {
+    dynamic decodedData = JSON.decode(data);
+    verify(decodedData is int);
+    setValue(parseValue(decodedData));
+  }
+
+  T parseValue(int value);
+  void setValue(T value);
+}
+
+abstract class BitFieldHandler<T> extends MessageHandler {
+  void parse(DateTime stamp, String data) {
+    dynamic decodedData = JSON.decode(data);
+    verify(decodedData is int);
+    final Set<T> result = new Set<T>();
+    int bits = decodedData;
+    int index = 0;
+    while (bits > 0) {
+      if (bits & 0x01 != 0)
+        result.add(parseBit(index));
+      bits >>= 1;
+      index += 1;
+    }
+    setValue(result);
+  }
+
+  T parseBit(int bit);
+  void setValue(Set<T> value);
+}
+
+// CONCRETE HANDLERS
 
 class DefaultHandler extends IgnoredMessageHandler {
   DefaultHandler(this._name);
@@ -143,17 +178,6 @@ class CycleDataHandler extends MessageHandler {
   }
 }
 
-abstract class IntHandler<T> extends MessageHandler {
-  void parse(DateTime stamp, String data) {
-    dynamic decodedData = JSON.decode(data);
-    verify(decodedData is int);
-    setValue(parseValue(decodedData));
-  }
-
-  T parseValue(int value);
-  void setValue(T value);
-}
-
 class OperatingModeHandler extends IntHandler<OperatingMode> {
   @override
   OperatingMode parseValue(int value) {
@@ -241,7 +265,19 @@ class DoorCountHandler extends IntHandler<int> {
   }
 }
 
-class RemindersHandler extends IgnoredMessageHandler { }
+class RemindersHandler extends BitFieldHandler<DishwasherReminders> {
+  DishwasherReminders parseBit(int bit) {
+    switch (bit) {
+      case 1: return DishwasherReminders.cleanFilter;
+      case 2: return DishwasherReminders.addRinseAid;
+      case 3: return DishwasherReminders.sanitized;
+      default: parseFail(); return null;
+    }
+  }
+  void setValue(Set<DishwasherReminders> value) {
+    dishwasher.reminders = value;
+  }
+}
 
 class CycleCountsHandler extends MessageHandler {
   void parse(DateTime stamp, String data) {
@@ -279,7 +315,7 @@ class RatesHandler extends MessageHandler {
   }
 }
 
-class ContinuousCycleHandler extends IgnoredMessageHandler {
+class ContinuousCycleHandler extends MessageHandler {
   void parse(DateTime stamp, String data) {
     dynamic decodedData = JSON.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'continuousCycle data not a map');
@@ -332,7 +368,22 @@ class PersonalityHandler extends MessageHandler {
   }
 }
 
-class DisabledFeaturesHandler extends IgnoredMessageHandler { }
+class DisabledFeaturesHandler extends BitFieldHandler<DishwasherFeatures> {
+  DishwasherFeatures parseBit(int bit) {
+    switch (bit) {
+      case 1: return DishwasherFeatures.heatedDry;
+      case 2: return DishwasherFeatures.boost;
+      case 3: return DishwasherFeatures.sanitize;
+      case 4: return DishwasherFeatures.washZones;
+      case 5: return DishwasherFeatures.steam;
+      case 6: return DishwasherFeatures.bottleBlast;
+      default: parseFail(); return null;
+    }
+  }
+  void setValue(Set<DishwasherFeatures> value) {
+    dishwasher.disabledFeatures = value;
+  }
+}
 
 class ControlLockHandler extends IntHandler<bool> {
   @override

@@ -36,6 +36,7 @@ void handleWebSocketMessage(dynamic message) {
 
 void main() {
   print('GE GDF570SGFWW dishwasher model');
+  print('▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔');
   HttpServer.bind('127.0.0.1', 2000)
     .then((HttpServer server) {
       server.listen((HttpRequest request) {

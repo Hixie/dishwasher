@@ -1,9 +1,28 @@
+import 'dart:collection';
+
 import 'box.dart';
 import 'hash_utils.dart';
-import 'list_utils.dart';
+import 'collection_utils.dart';
 
 enum DryOptions { idle, heated }
 enum WashTemperature { normal, boost, sanitize }
+
+enum DishwasherFeatures { heatedDry, boost, sanitize, washZones, steam, bottleBlast }
+const Map<DishwasherFeatures, String> kDishwasherFeaturesDescriptions = const <DishwasherFeatures, String>{
+  DishwasherFeatures.heatedDry: 'Heated dry',
+  DishwasherFeatures.boost: 'Boost',
+  DishwasherFeatures.sanitize: 'Sanitize',
+  DishwasherFeatures.washZones: 'Wash zones',
+  DishwasherFeatures.steam: 'Steam',
+  DishwasherFeatures.bottleBlast: 'Bottle blast',
+};
+
+enum DishwasherReminders { cleanFilter, addRinseAid, sanitized }
+const Map<DishwasherReminders, String> kDishwasherRemindersDescriptions = const <DishwasherReminders, String>{
+  DishwasherReminders.cleanFilter: 'Clean filter',
+  DishwasherReminders.addRinseAid: 'Add rinse aid',
+  DishwasherReminders.sanitized: 'Sanitized',
+};
 
 enum UserCycleSelection { autosense, heavy, normal, light }
 const Map<UserCycleSelection, String> kUserCycleSelectionDescriptions = const <UserCycleSelection, String>{
@@ -123,8 +142,8 @@ const Map<int, String> kCycleStepDescriptions = const <int, String>{
   (37 << kCycle) + 0: 'heavy program, prewash 37:0',
   (39 << kCycle) + 0: 'heavy program, prewash 39:0',
   
-  (52 << kCycle) + 0: 'heated dry 52:0', // -> 52:1
-  (52 << kCycle) + 1: 'heated dry 52:1', // -> 52:2; goes inactive during this step
+  (52 << kCycle) + 0: 'heated dry starting', // -> 52:1
+  (52 << kCycle) + 1: 'heated drying', // -> 52:2; goes inactive during this step
   (52 << kCycle) + 2: 'heated dry finished', // -> end; goes into standby when entering this step
 
   (56 << kCycle) + 0: 'non-sanitizing final phase 56:0',
@@ -541,8 +560,10 @@ class Dishwasher {
   set cycleStep(int value) {
     if (_cycleStep == value)
       return;
-    if (_cycleTimer.isRunning)
+    if (_cycleTimer.isRunning) {
       print('Cycle step transition. Ran step "${describeCycleStep(cycleStep)}" for ${describeDuration(_cycleTimer.elapsed)}.');
+      print('');
+    }
     _cycleTimer.reset();
     _cycleTimer.start();
     _cycleStep = value;
@@ -693,6 +714,26 @@ class Dishwasher {
     _dirtyUI = true;
   }
 
+  Set<DishwasherReminders> get reminders => new HashSet<DishwasherReminders>.from(_reminders);
+  Set<DishwasherReminders> _reminders = new HashSet<DishwasherReminders>();
+  set reminders(Set<DishwasherReminders> value) {
+    final Set<DishwasherReminders> newValue = new HashSet<DishwasherReminders>.from(value);
+    if (setsEqual/*<DishwasherReminders>*/(_reminders, newValue))
+      return;
+    _reminders = newValue;
+    _dirtyUI = true;
+  }
+
+  Set<DishwasherFeatures> get disabledFeatures => new HashSet<DishwasherFeatures>.from(_disabledFeatures);
+  Set<DishwasherFeatures> _disabledFeatures = new HashSet<DishwasherFeatures>();
+  set disabledFeatures(Set<DishwasherFeatures> value) {
+    final Set<DishwasherFeatures> newValue = new HashSet<DishwasherFeatures>.from(value);
+    if (setsEqual/*<DishwasherFeatures>*/(_disabledFeatures, newValue))
+      return;
+    _disabledFeatures = newValue;
+    _dirtyInternals = true;
+  }
+
   int get doorCount => _doorCount;
   int _doorCount;
   set doorCount(int value) {
@@ -705,10 +746,10 @@ class Dishwasher {
   List<int> get sensors => _sensors.toList();
   List<int> _sensors;
   set sensors(Iterable<int> value) {
-    final List<int> newList = value.toList();
-    if (listsEqual/*<int>*/(_sensors, newList))
+    final List<int> newValue = value.toList();
+    if (listsEqual/*<int>*/(_sensors, newValue))
       return;
-    _sensors = newList;
+    _sensors = newValue;
     _dirtyUI = true;
   }
 
@@ -833,14 +874,20 @@ class Dishwasher {
       }
     }
     final List<String> topLeft = <String>[modeUI];
+    if (reminders.contains(DishwasherReminders.sanitized))
+      topLeft.add('SANITIZED');
     if (demo)
       topLeft.add('DEMO');
     final List<String> topRight = <String>[];
     if (mute)
       topRight.add('MUTED');
+    if (reminders.contains(DishwasherReminders.addRinseAid))
+      topRight.add('ADD RINSE AID');
+    if (reminders.contains(DishwasherReminders.cleanFilter))
+      topRight.add('CLEAN FILTER');
     final List<String> bottomCenter = <String>[];
     if (_lastMessageTimestamp != null)
-      bottomCenter.add('$_lastMessageTimestamp');
+      bottomCenter.add('${_lastMessageTimestamp.toLocal()}');
     final List<String> contents = <String>[settings.join("  ")];
     if (!dishwasherIdle)
       contents.add('Progress: ${ "█" * stepsExecuted }${ "░" * (stepsEstimated - stepsExecuted) } ${(100.0 * stepsExecuted / stepsEstimated).toStringAsFixed(1)}% ($stepsExecuted/$stepsEstimated)');
@@ -857,6 +904,7 @@ class Dishwasher {
       margin: 3,
       padding: 1
     ));
+    print('');
   }
 
   CycleData _cycle0;
@@ -884,6 +932,11 @@ class Dishwasher {
     final List<String> lines = <String>[];
     if (personality != null)
       lines.add('Personality: $personality.');
+    if (disabledFeatures.length > 0) {
+      final List<String> disabledFeaturesDescriptions = disabledFeatures.map/*<String>*/((DishwasherFeatures feature) => kDishwasherFeaturesDescriptions[feature]).toList();
+      disabledFeaturesDescriptions.sort();
+      lines.add('Disabled features: ${disabledFeaturesDescriptions.join(", ")}.');
+    }
     if (rates != null)
       lines.add('$rates');
     if (errorState != null)
@@ -897,6 +950,7 @@ class Dishwasher {
     print(_internalsBox.buildBox(
       lines: lines
     ));
+    print('');
   }
 
   void printLog() {
@@ -911,6 +965,7 @@ class Dishwasher {
     print('Cycle log (most recent first):');
     for (CycleData cycle in cycles)
       print('  $cycle');
+    print('');
   }
 
   void checkDirty() {
