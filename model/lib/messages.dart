@@ -123,11 +123,11 @@ class CycleDataHandler extends MessageHandler {
     verify(decodedData['cycleDurationInMinutes'] is int, 'cycleData$_cycle.cycleDurationInMinutes not a number');
     final int minimumTemperature = decodedData['cycleMinimumTemperatureInFahrenheit'];
     final int maximumTemperature = decodedData['cycleMaximumTemperatureInFahrenheit'];
-    verify((minimumTemperature < maximumTemperature) || (minimumTemperature == 255 && maximumTemperature == 0));
+    verify((minimumTemperature <= maximumTemperature) || (minimumTemperature == 255 && maximumTemperature == 0));
     final int finalCirculationTemperature = decodedData['cycleFinalCirculationTemperatureInFahrenheit'];
     final int minimumTurbidity = decodedData['cycleMinimumTurbidityInNTU'];
     final int maximumTurbidity = decodedData['cycleMaximumTurbidityInNTU'];
-    verify((minimumTurbidity < maximumTurbidity) || (minimumTurbidity == 65535 && maximumTurbidity == 0));
+    verify((minimumTurbidity <= maximumTurbidity) || (minimumTurbidity == 65535 && maximumTurbidity == 0));
     final CycleData cycleData = new CycleData(
       number: decodedData['cycleNumber'],
       minimumTemperature: minimumTemperature < maximumTemperature ? new Temperature.F(minimumTemperature.toDouble()) : null,
@@ -242,10 +242,57 @@ class DoorCountHandler extends IntHandler<int> {
 }
 
 class RemindersHandler extends IgnoredMessageHandler { }
-class CycleCountsHandler extends IgnoredMessageHandler { }
-class ErrorsHandler extends IgnoredMessageHandler { }
-class RatesHandler extends IgnoredMessageHandler { }
-class ContinuousCycleHandler extends IgnoredMessageHandler { }
+
+class CycleCountsHandler extends MessageHandler {
+  void parse(DateTime stamp, String data) {
+    dynamic decodedData = JSON.decode(data);
+    verify(decodedData is Map<dynamic, dynamic>, 'cycleCounts data not a map');
+    verify(decodedData['startedCount'] is int, 'cycleCounts.startedCount not a number');
+    verify(decodedData['completedCount'] is int, 'cycleCounts.completedCount not a number');
+    verify(decodedData['resetCount'] is int, 'cycleCounts.resetCount not a number');
+    dishwasher.countOfCyclesStarted = decodedData['startedCount'];
+    dishwasher.countOfCyclesCompleted = decodedData['completedCount'];
+    dishwasher.countOfCyclesReset = decodedData['resetCount'];
+  }
+}
+
+class ErrorsHandler extends MessageHandler {
+  void parse(DateTime stamp, String data) {
+    dynamic decodedData = JSON.decode(data);
+    verify(decodedData is Map<dynamic, dynamic>, 'error data not a map');
+    verify(decodedData['errorId'] is int, 'errors.errorId not a number');
+    verify(isBit(decodedData['errorState']), 'errors.errorState not a bit');
+    dishwasher.errorState = new DishwasherError(errorId: decodedData['errorId'], active: decodedData['errorState'] == 1);
+  }
+}
+
+class RatesHandler extends MessageHandler {
+  void parse(DateTime stamp, String data) {
+    dynamic decodedData = JSON.decode(data);
+    verify(decodedData is Map<dynamic, dynamic>, 'rates data not a map');
+    verify(decodedData['fillRate'] is int, 'rates.fillRate not a number');
+    verify(decodedData['drainRate'] is int, 'rates.drainRate not a number');
+    dishwasher.rates = new DishwasherRates(
+      fill: decodedData['fillRate'],
+      drain: decodedData['drainRate']
+    );
+  }
+}
+
+class ContinuousCycleHandler extends IgnoredMessageHandler {
+  void parse(DateTime stamp, String data) {
+    dynamic decodedData = JSON.decode(data);
+    verify(decodedData is Map<dynamic, dynamic>, 'continuousCycle data not a map');
+    verify(decodedData['cycleToRun'] is int, 'continuousCycle.cycleToRun not a number');
+    verify(decodedData['cyclesRemaining'] is int, 'continuousCycle.cyclesRemaining not a number');
+    verify(decodedData['minutesBetweenCycles'] is int, 'continuousCycle.minutesBetweenCycles not a number');
+    dishwasher.continuousCycleState = new ContinuousCycleState(
+      cycle: decodedData['cycleToRun'],
+      remainingCount: decodedData['cyclesRemaining'],
+      interval: new Duration(minutes: decodedData['minutesBetweenCycles'])
+    );
+  }
+}
 
 class AnalogDataHandler extends MessageHandler {
   void parse(DateTime stamp, String data) {
@@ -257,8 +304,34 @@ class AnalogDataHandler extends MessageHandler {
   }
 }
 
-class DryDrainCountersHandler extends IgnoredMessageHandler { }
-class PersonalityHandler extends IgnoredMessageHandler { }
+class DryDrainCountersHandler extends MessageHandler {
+  void parse(DateTime stamp, String data) {
+    dynamic decodedData = JSON.decode(data);
+    verify(decodedData is Map<dynamic, dynamic>, 'dryDrainCounters data not a map');
+    verify(decodedData['noDryDrainDetectedCount'] is int, 'dryDrainCounters.noDryDrainDetectedCount not a number');
+    verify(decodedData['noDryDrainDetectedMaximumValue'] is int, 'dryDrainCounters.noDryDrainDetectedMaximumValue not a number');
+    dishwasher.noDryDrainState = new NoDryDrainState(count: decodedData['noDryDrainDetectedCount'], maximum: decodedData['noDryDrainDetectedMaximumValue']);
+  }
+}
+
+class PersonalityHandler extends MessageHandler {
+  void parse(DateTime stamp, String data) {
+    dynamic decodedData = JSON.decode(data);
+    verify(decodedData is Map<dynamic, dynamic>, 'personality data not a map');
+    verify(decodedData['personality'] is int, 'personality.personality not a number');
+    verify(decodedData['source'] is int, 'personality.source not a number');
+    dishwasher.personality = new Personality(boardId: decodedData['personality'], source: parseSource(decodedData['source']));
+  }
+
+  PersonalitySource parseSource(int value) {
+    switch (value) {
+      case 0: return PersonalitySource.bootloaderParametric;
+      case 1: return PersonalitySource.AD;
+      default: parseFail(); return null;
+    }
+  }
+}
+
 class DisabledFeaturesHandler extends IgnoredMessageHandler { }
 
 class ControlLockHandler extends IntHandler<bool> {

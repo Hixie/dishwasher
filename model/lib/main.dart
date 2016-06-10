@@ -7,8 +7,8 @@ import 'model.dart';
 Stopwatch staleness = new Stopwatch();
 Timer dirtyTimer;
 
-const Duration kCoallesceDelay = const Duration(milliseconds: 100);
-const Duration kMaxStaleness = const Duration(milliseconds: 800);
+const Duration kCoallesceDelay = const Duration(milliseconds: 800);
+const Duration kMaxStaleness = const Duration(milliseconds: 2000);
 
 void handleWebSocketMessage(dynamic message) {
   List<String> parts;
@@ -19,6 +19,7 @@ void handleWebSocketMessage(dynamic message) {
     stamp = new DateTime.fromMillisecondsSinceEpoch(int.parse(parts[0], radix: 10), isUtc: true);
     MessageHandler handler = handlers[parts[1]] ?? new DefaultHandler(parts[1]);
     handler.parse(stamp, parts[2]);
+    dishwasher.lastMessageTimestamp = stamp;
   } catch (e) {
     print('$stamp   ${parts[1]}  ${parts[2]}');
     print('${ " " * stamp.toString().length }   unable to parse: $e');

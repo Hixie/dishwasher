@@ -1,5 +1,4 @@
-import 'dart:math' as math;
-
+import 'box.dart';
 import 'hash_utils.dart';
 import 'list_utils.dart';
 
@@ -63,8 +62,15 @@ const Map<int, String> kCycleStepDescriptions = const <int, String>{
   (0 << kCycle) + 13: 'boost autosense program? rinsing? 0:13',
   (0 << kCycle) + 14: 'boost autosense program? rinsing? 0:14',
   
-  // seen in autosense mode
-  (2 << kCycle) + 0: 'low temperature autosense program? 2:0', // need to examine steps
+  // seen in autosense mode with Sanitize and Heated Dry together
+  (2 << kCycle) + 0: 'autosense program 2:0', // 2ish minutes -> 2:1
+  (2 << kCycle) + 1: 'autosense program 2:1', // 1ish minutes -> 21:0
+  (2 << kCycle) + 7: 'autosense program 2:7', // -> 2:8
+  (2 << kCycle) + 8: 'autosense program 2:8', // -> 2:9
+  (2 << kCycle) + 9: 'autosense program 2:9', // long -> 2:9
+  (2 << kCycle) + 10: 'autosense program 2:10', // -> 20:0-3 -> 27:0
+  (2 << kCycle) + 14: 'autosense program 2:14', // -> 2:15
+  (2 << kCycle) + 15: 'autosense program 2:15', // -> 20:0-3 -> 26:0
   
   // seen in heavy mode
   (3 << kCycle) + 0: 'heavy program? 3:0', // need to examine steps
@@ -90,12 +96,12 @@ const Map<int, String> kCycleStepDescriptions = const <int, String>{
   (16 << kCycle) + 3: 'steam program? 16:3',
   (16 << kCycle) + 4: 'steam program? spinning water? 16:4',
 
-  (20 << kCycle) + 0: 'initialising draining cycle 20:0',
+  (20 << kCycle) + 0: 'initialising draining cycle 20:0', // brief
   (20 << kCycle) + 1: 'draining 20:1',
   (20 << kCycle) + 2: 'twenty second delay during draining cycle 20:2',
   (20 << kCycle) + 3: 'draining until empty 20:3',
 
-  (21 << kCycle) + 0: 'prewash for non-heavy cycles, spinning and raising temperature? 21:0',
+  (21 << kCycle) + 0: 'prewash for non-heavy cycles, spinning and raising temperature? 21:0', // 3ish minutes -> 20:0-3 -> 2:7
 
   // seen only with autosense, steam, heated dry, and boost enabled
   (22 << kCycle) + 0: 'boost autosense prewash? 22:0',
@@ -107,26 +113,29 @@ const Map<int, String> kCycleStepDescriptions = const <int, String>{
 
   (25 << kCycle) + 0: 'prewash for heavy program without steam 25:0',
 
-  (26 << kCycle) + 0: 'sanitizing rinse 26:0',
-  (26 << kCycle) + 1: 'sanitizing rinse 26:0',
+  (26 << kCycle) + 0: 'sanitizing rinse 26:0', // long -> 75:1
+  (26 << kCycle) + 1: 'sanitizing rinse 26:1', // ??? may not exist
 
-  (27 << kCycle) + 0: 'autosense program, rinse phase 27:0',
+  (27 << kCycle) + 0: 'autosense program, rinse phase 27:0', // -> 27:1
+  (27 << kCycle) + 1: 'autosense program, rinse phase 27:1', // long -> 20:0-3 -> 2:14
   
   (35 << kCycle) + 0: 'heavy program, prewash 35:0',
   (37 << kCycle) + 0: 'heavy program, prewash 37:0',
   (39 << kCycle) + 0: 'heavy program, prewash 39:0',
   
-  (52 << kCycle) + 0: 'heated dry 52:0',
+  (52 << kCycle) + 0: 'heated dry 52:0', // -> 52:1
+  (52 << kCycle) + 1: 'heated dry 52:1', // -> 52:2; goes inactive during this step
+  (52 << kCycle) + 2: 'heated dry finished', // -> end; goes into standby when entering this step
 
   (56 << kCycle) + 0: 'non-sanitizing final phase 56:0',
 
-  (59 << kCycle) + 0: 'filling for sanitization? 59:0',
-  (59 << kCycle) + 1: 'sanitizing, raising temperature? 59:1',
-  (59 << kCycle) + 2: 'sanitizing? 59:2', // starting at temp 68.3C?
+  (59 << kCycle) + 0: 'filling for sanitization? 59:0', // long, -> 59:1
+  (59 << kCycle) + 1: 'sanitizing, raising temperature? 59:1', // -> 59:2
+  (59 << kCycle) + 2: 'sanitizing? 59:2', // starting at temp 68.3C? // -> 74:0-3 -> 52:0
 
   (63 << kCycle) + 4: 'idle standby with sanitize light? 63:4',
 
-  (66 << kCycle) + 4: 'inactive',
+  (66 << kCycle) + 4: 'cycle finished', // -> end; not heated dry
 
   (71 << kCycle) + 0: 'second steam program? 71:0',
 
@@ -135,14 +144,40 @@ const Map<int, String> kCycleStepDescriptions = const <int, String>{
   (74 << kCycle) + 2: 'twenty second delay during final draining cycle 74:2',
   (74 << kCycle) + 3: 'final draining cycle, draining until empty 74:3',
 
-  (75 << kCycle) + 0: 'preinitialized draining cycle 75:1',
-  (75 << kCycle) + 1: 'twenty second delay during preinitialized draining cycle 75:2',
-  (75 << kCycle) + 2: 'preinitialized draining cycle, draining until empty 75:3',
+  (75 << kCycle) + 0: 'preinitialized draining cycle 75:1', // -> 75:2
+  (75 << kCycle) + 1: 'twenty second delay during preinitialized draining cycle 75:2', // -> 75:3
+  (75 << kCycle) + 2: 'preinitialized draining cycle, draining until empty 75:3', // -> 59:0
 };
 
-final Set<int> kEndStates = new Set<int>.from(<int>[
+final Set<int> kUninterestingIdleCycleStates = new Set<int>.from(<int>[
   (66 << kCycle) + 4,
 ]);
+
+String describeCycleStep(int cycleStep) {
+  return kCycleStepDescriptions[cycleStep] ?? "${cycleStep >> kCycle}:${cycleStep & ~((~0) << kCycle)} ??";
+}
+
+String describeDuration(Duration duration) {
+  String result = '';
+  if (duration.inDays > 0) {
+    result += '${duration.inDays}d ';
+    duration -= new Duration(days: duration.inDays);
+  }
+  if (duration.inHours > 0 || result != '') {
+    result += '${duration.inHours}h ';
+    duration -= new Duration(hours: duration.inHours);
+  }
+  if (duration.inMinutes > 0 || result != '') {
+    result += '${duration.inMinutes}m';
+    duration -= new Duration(minutes: duration.inMinutes);
+  }
+  if (duration.inSeconds > 0 || result == '') {
+    if (result != '')
+      result += ' ';
+    result += '${duration.inSeconds}s';
+  }
+  return result;
+}
 
 
 class Temperature {
@@ -235,14 +270,14 @@ class CycleData {
     assert((minimumTurbidity == null) == (maximumTurbidity == null));
     if (minimumTurbidity != null)
       result.add('Turbidity: $minimumTurbidity .. $maximumTurbidity');
-    result.add('start time offset: $startTime');
+    result.add('start time offset: t₀+${describeDuration(startTime)}');
     String lead;
     if (active) {
       lead = 'Active:';
-      result.add('Duration: $duration and counting...');
+      result.add('Duration: ${describeDuration(duration)} and counting...');
     } else {
       lead = 'Completed:';
-      result.add('Duration: $duration');
+      result.add('Duration: ${describeDuration(duration)}');
     }
     return '$lead ${result.join("; ")}';
   }
@@ -277,8 +312,200 @@ class CycleData {
   );
 }
 
+class DishwasherError {
+  const DishwasherError({
+    this.errorId,
+    this.active
+  });
+
+  final int errorId;
+  final bool active;
+
+  String get errorMessage {
+    switch (errorId) {
+      default: return '<code $errorId>.';
+    }
+  }
+
+  String toString() {
+    if (active)
+      return 'ERROR: $errorMessage';
+    return 'Last error: $errorMessage';
+  }
+
+  @override
+  bool operator ==(dynamic other) {
+    if (other is! DishwasherError)
+      return false;
+    DishwasherError typedOther = other;
+    return typedOther.errorId == errorId
+        && typedOther.active == active;
+  }
+
+  @override
+  int get hashCode => hashValues(
+    errorId,
+    active
+  );
+}
+
+class NoDryDrainState {
+  const NoDryDrainState({
+    this.count,
+    this.maximum
+  });
+
+  final int count;
+  final int maximum;
+
+  bool get alarmActive => count > 0;
+
+  String toString() {
+    if (count > 0)
+      return 'FAILED DRY DRAIN DETECTED: $count (maximum $maximum).';
+    return '$count failed dry drains (maximum $maximum).';
+  }
+
+  @override
+  bool operator ==(dynamic other) {
+    if (other is! NoDryDrainState)
+      return false;
+    NoDryDrainState typedOther = other;
+    return typedOther.count == count
+        && typedOther.maximum == maximum;
+  }
+
+  @override
+  int get hashCode => hashValues(
+    count,
+    maximum
+  );
+}
+
+enum PersonalitySource { bootloaderParametric, AD }
+
+class Personality {
+  const Personality({
+    this.boardId,
+    this.source
+  });
+
+  final int boardId;
+  final PersonalitySource source;
+
+  String get boardDescription {
+    switch (boardId) {
+      case 15: return 'no UI personality installed';
+      default: return '<unknown personality $boardId>';
+    }
+  }
+
+  String get sourceDescription {
+    switch (source) {
+      case PersonalitySource.bootloaderParametric: return 'bootloader parametric';
+      case PersonalitySource.AD: return 'A/D';
+    }
+    return '<unknown source $source>';
+  }
+
+  String toString() {
+    return '$sourceDescription specified $boardDescription';
+  }
+
+  @override
+  bool operator ==(dynamic other) {
+    if (other is! Personality)
+      return false;
+    Personality typedOther = other;
+    return typedOther.boardId == boardId
+        && typedOther.source == source;
+  }
+
+  @override
+  int get hashCode => hashValues(
+    boardId,
+    source
+  );
+}
+
+class DishwasherRates {
+  const DishwasherRates({
+    this.fill,
+    this.drain
+  });
+
+  final int fill;
+  final int drain;
+
+  String toString() {
+    return 'Fill rate: $fill. Drain rate: $drain.';
+  }
+
+  @override
+  bool operator ==(dynamic other) {
+    if (other is! DishwasherRates)
+      return false;
+    DishwasherRates typedOther = other;
+    return typedOther.fill == fill
+        && typedOther.drain == drain;
+  }
+
+  @override
+  int get hashCode => hashValues(
+    fill,
+    drain
+  );
+}
+
+class ContinuousCycleState {
+  const ContinuousCycleState({
+    this.cycle,
+    this.remainingCount,
+    this.interval
+  });
+
+  final int cycle;
+  final int remainingCount;
+  final Duration interval;
+
+  String toString() {
+    return 'cycle $cycle, $remainingCount remaining cycles. ${describeDuration(interval)} between cycles.';
+  }
+
+  @override
+  bool operator ==(dynamic other) {
+    if (other is! ContinuousCycleState)
+      return false;
+    ContinuousCycleState typedOther = other;
+    return typedOther.cycle == cycle
+        && typedOther.remainingCount == remainingCount
+        && typedOther.interval == interval;
+  }
+
+  @override
+  int get hashCode => hashValues(
+    cycle,
+    remainingCount,
+    interval
+  );
+}
+
+
+// DISHWASHER
+// ==========
+
 class Dishwasher {
-  bool _dirty = false;
+  bool _dirtyUI = false;
+  bool _dirtyLog = false;
+  bool _dirtyInternals = false;
+
+  DateTime get lastMessageTimestamp => _lastMessageTimestamp;
+  DateTime _lastMessageTimestamp;
+  set lastMessageTimestamp(DateTime value) {
+    if (_lastMessageTimestamp == value)
+      return;
+    _lastMessageTimestamp = value;
+  }
 
   OperatingMode get operatingMode => _operatingMode;
   OperatingMode _operatingMode;
@@ -286,7 +513,7 @@ class Dishwasher {
     if (_operatingMode == value)
       return;
     _operatingMode = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   CycleSelection get cycleSelection => _cycleSelection;
@@ -295,7 +522,7 @@ class Dishwasher {
     if (_cycleSelection == value)
       return;
     _cycleSelection = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   CycleState get cycleState => _cycleState;
@@ -304,16 +531,22 @@ class Dishwasher {
     if (_cycleState == value)
       return;
     _cycleState = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
+
+  Stopwatch _cycleTimer = new Stopwatch();
 
   int get cycleStep => _cycleStep;
   int _cycleStep = 0;
   set cycleStep(int value) {
     if (_cycleStep == value)
       return;
+    if (_cycleTimer.isRunning)
+      print('Cycle step transition. Ran step "${describeCycleStep(cycleStep)}" for ${describeDuration(_cycleTimer.elapsed)}.');
+    _cycleTimer.reset();
+    _cycleTimer.start();
     _cycleStep = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   int get stepsExecuted => _stepsExecuted;
@@ -322,7 +555,7 @@ class Dishwasher {
     if (_stepsExecuted == value)
       return;
     _stepsExecuted = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   int get stepsEstimated => _stepsEstimated;
@@ -331,7 +564,34 @@ class Dishwasher {
     if (_stepsEstimated == value)
       return;
     _stepsEstimated = value;
-    _dirty = true;
+    _dirtyUI = true;
+  }
+
+  int get countOfCyclesStarted => _countOfCyclesStarted;
+  int _countOfCyclesStarted;
+  set countOfCyclesStarted(int value) {
+    if (_countOfCyclesStarted == value)
+      return;
+    _countOfCyclesStarted = value;
+    _dirtyUI = true;
+  }
+
+  int get countOfCyclesCompleted => _countOfCyclesCompleted;
+  int _countOfCyclesCompleted;
+  set countOfCyclesCompleted(int value) {
+    if (_countOfCyclesCompleted == value)
+      return;
+    _countOfCyclesCompleted = value;
+    _dirtyUI = true;
+  }
+
+  int get countOfCyclesReset => _countOfCyclesReset;
+  int _countOfCyclesReset;
+  set countOfCyclesReset(int value) {
+    if (_countOfCyclesReset == value)
+      return;
+    _countOfCyclesReset = value;
+    _dirtyUI = true;
   }
 
   WashTemperature get washTemperature => _washTemperature;
@@ -340,7 +600,7 @@ class Dishwasher {
     if (_washTemperature == value)
       return;
     _washTemperature = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   UserCycleSelection get userCycleSelection => _userCycleSelection;
@@ -349,7 +609,7 @@ class Dishwasher {
     if (_userCycleSelection == value)
       return;
     _userCycleSelection = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   int get delay => _delay;
@@ -358,7 +618,7 @@ class Dishwasher {
     if (_delay == value)
       return;
     _delay = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   bool get sabbathMode => _sabbathMode;
@@ -367,7 +627,7 @@ class Dishwasher {
     if (_sabbathMode == value)
       return;
     _sabbathMode = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   bool get uiLocked => _uiLocked;
@@ -376,7 +636,7 @@ class Dishwasher {
     if (_uiLocked == value)
       return;
     _uiLocked = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   bool get controlLocked => _controlLocked;
@@ -385,7 +645,7 @@ class Dishwasher {
     if (_controlLocked == value)
       return;
     _controlLocked = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   bool get demo => _demo;
@@ -394,7 +654,7 @@ class Dishwasher {
     if (_demo == value)
       return;
     _demo = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   bool get mute => _mute;
@@ -403,7 +663,7 @@ class Dishwasher {
     if (_mute == value)
       return;
     _mute = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   bool get steam => _steam;
@@ -412,7 +672,7 @@ class Dishwasher {
     if (_steam == value)
       return;
     _steam = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   DryOptions get dryOptions => _dryOptions;
@@ -421,7 +681,7 @@ class Dishwasher {
     if (_dryOptions == value)
       return;
     _dryOptions = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   bool get rinseAidEnabled => _rinseAidEnabled;
@@ -430,7 +690,7 @@ class Dishwasher {
     if (_rinseAidEnabled == value)
       return;
     _rinseAidEnabled = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   int get doorCount => _doorCount;
@@ -439,7 +699,7 @@ class Dishwasher {
     if (_doorCount == value)
       return;
     _doorCount = value;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   List<int> get sensors => _sensors.toList();
@@ -449,7 +709,7 @@ class Dishwasher {
     if (listsEqual/*<int>*/(_sensors, newList))
       return;
     _sensors = newList;
-    _dirty = true;
+    _dirtyUI = true;
   }
 
   static const List<String> kSensorBlocks = const <String>[ '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█' ];
@@ -463,6 +723,52 @@ class Dishwasher {
     return result;
   }
 
+  DishwasherError get errorState => _errorState;
+  DishwasherError _errorState;
+  set errorState(DishwasherError value) {
+    if (_errorState == value)
+      return;
+    _errorState = value;
+    _dirtyInternals = true;
+  }
+
+  NoDryDrainState get noDryDrainState => _noDryDrainState;
+  NoDryDrainState _noDryDrainState;
+  set noDryDrainState(NoDryDrainState value) {
+    if (_noDryDrainState == value)
+      return;
+    _noDryDrainState = value;
+    _dirtyInternals = true;
+  }
+
+  Personality get personality => _personality;
+  Personality _personality;
+  set personality(Personality value) {
+    if (_personality == value)
+      return;
+    _personality = value;
+    _dirtyInternals = true;
+  }
+
+  ContinuousCycleState get continuousCycleState => _continuousCycleState;
+  ContinuousCycleState _continuousCycleState;
+  set continuousCycleState(ContinuousCycleState value) {
+    if (_continuousCycleState == value)
+      return;
+    _continuousCycleState = value;
+    _dirtyInternals = true;
+  }
+
+  DishwasherRates get rates => _rates;
+  DishwasherRates _rates;
+  set rates(DishwasherRates value) {
+    if (_rates == value)
+      return;
+    _rates = value;
+    _dirtyInternals = true;
+  }
+
+  static final _uiBox = new SingleLineBox();
   void printInterface() {
     List<String> settings = <String>[];
     if (delay > 0)
@@ -498,56 +804,59 @@ class Dishwasher {
     // * Cycle state
     final String cycleStateDescription = kCycleStateDescriptions[cycleState] ?? 'unknown cycle state';
     // * Cycle Phase
-    final String cycleStepDescription = kCycleStepDescriptions[cycleStep] ?? "${cycleStep >> kCycle}:${cycleStep & ~((~0) << kCycle)} ??";
+    final String cycleStepDescription = describeCycleStep(cycleStep);
     // BOX
     String modeUI;
     if (dishwasherIdle) {
-      if (cycleState != CycleState.none || !kEndStates.contains(cycleStep)) {
-        modeUI = '┤ INCONSISTENT STATE • $operatingModeDescription • $cycleSelectionDescription • $cycleStateDescription • $cycleStepDescription ├';
-      // } else if (cycleSelection != CycleSelection.none) {
-      //   modeUI = '┤ $operatingModeDescription • last cycle selection: $cycleSelectionDescription • $cycleStepDescription ├';
+      if (cycleState != CycleState.none) {
+        modeUI = 'INCONSISTENT STATE • $operatingModeDescription • $cycleSelectionDescription • $cycleStateDescription • $cycleStepDescription';
+      } else if (!kUninterestingIdleCycleStates.contains(cycleStep)) {
+        //if (cycleSelection != CycleSelection.none) {
+        //  modeUI = '$operatingModeDescription • last cycle selection: $cycleSelectionDescription • $cycleStepDescription';
+        //} else {
+          modeUI = '$operatingModeDescription • $cycleStepDescription';
+        //}
       } else {
-        modeUI = '┤ $operatingModeDescription ├';
+        modeUI = '$operatingModeDescription';
       }
     } else if (dishwasherPaused) {
       if (cycleSelection == CycleSelection.none || cycleState != CycleState.pause) {
-        modeUI = '┤ INCONSISTENT STATE • $operatingModeDescription • $cycleSelectionDescription • $cycleStateDescription • $cycleStepDescription ├';
+        modeUI = 'INCONSISTENT STATE • $operatingModeDescription • $cycleSelectionDescription • $cycleStateDescription • $cycleStepDescription';
       } else {
-        modeUI = '┤ PAUSED • $cycleSelectionDescription • $cycleStepDescription ├';
+        modeUI = 'PAUSED • $cycleSelectionDescription • $cycleStepDescription';
       }
     } else {
-      if (cycleSelection == CycleSelection.none || cycleState == CycleState.none || kEndStates.contains(cycleStep)) {
-        modeUI = '┤ INCONSISTENT STATE • $operatingModeDescription • $cycleSelectionDescription • $cycleStateDescription • $cycleStepDescription ├';
+      if (cycleSelection == CycleSelection.none || cycleState == CycleState.none || kUninterestingIdleCycleStates.contains(cycleStep)) {
+        modeUI = 'INCONSISTENT STATE • $operatingModeDescription • $cycleSelectionDescription • $cycleStateDescription • $cycleStepDescription';
       } else {
-        modeUI = '┤ $operatingModeDescription • $cycleSelectionDescription • $cycleSelectionDescription • $cycleStepDescription ├';
+        modeUI = '$operatingModeDescription • $cycleSelectionDescription • $cycleStateDescription • $cycleStepDescription';
       }
     }
-    String demoUI = demo ? '┤ DEMO ├' : '';
-    String muteUI = mute ? '┤ MUTED ├' : '';
-    int margin = 5;
+    final List<String> topLeft = <String>[modeUI];
+    if (demo)
+      topLeft.add('DEMO');
+    final List<String> topRight = <String>[];
+    if (mute)
+      topRight.add('MUTED');
+    final List<String> bottomCenter = <String>[];
+    if (_lastMessageTimestamp != null)
+      bottomCenter.add('$_lastMessageTimestamp');
     final List<String> contents = <String>[settings.join("  ")];
     if (!dishwasherIdle)
-      contents.add('Progress: ${ "█" * stepsExecuted }${ stepsEstimated < stepsExecuted ? "░" * (stepsEstimated - stepsExecuted) : "" } ${(100.0 * stepsExecuted / stepsEstimated).toStringAsFixed(1)}% ($stepsExecuted/$stepsEstimated)');
+      contents.add('Progress: ${ "█" * stepsExecuted }${ "░" * (stepsEstimated - stepsExecuted) } ${(100.0 * stepsExecuted / stepsEstimated).toStringAsFixed(1)}% ($stepsExecuted/$stepsEstimated)');
+    assert((_countOfCyclesStarted == null) == (_countOfCyclesCompleted == null));
+    assert((_countOfCyclesStarted == null) == (_countOfCyclesReset == null));
+    if (_countOfCyclesStarted != null)
+      contents.add('Cycle counts: $_countOfCyclesStarted started, $_countOfCyclesCompleted completed, $_countOfCyclesReset reset');
     contents.add('Door open/close count: ${ doorCount ?? "unknown" } \t Sensors: ${ graphSensors(_sensors) }');
-    int width = margin * 4 + modeUI.length + demoUI.length + muteUI.length;
-    width = contents.fold(width, (int currentWidth, String s) => math.max(currentWidth, s.length));
-    final String leaderLeft = '┌${"─" * margin}$modeUI${"─" * margin}$demoUI';
-    final String leaderRight = '$muteUI${"─" * margin}┐';
-    final int innerLeaderWidth = width - leaderLeft.length - leaderRight.length + 4; // 4 is the padding and edge lines
-    final String leader = '$leaderLeft${ "─" * innerLeaderWidth }$leaderRight';
-    final String footer = '└${ "─" * (width + 2) }┘'; // 2 is the padding internally
-    print(leader);
-    for (String s in contents) {
-      final int tabCount = '\t'.allMatches(s).length;
-      if (tabCount > 0) {
-        String spaces = ' ' * (((width - (s.length - tabCount)) / tabCount).truncate());
-        s = s.replaceAll('\t', spaces);
-      }
-      print('│ ${s.padRight(width)} │');
-    }
-    print(footer);
-    if (controlLocked == true)
-      print('Control Locks: Locked (?)');
+    print(_uiBox.buildBox(
+      topLeftLabels: topLeft,
+      topRightLabels: topRight,
+      bottomCenterLabels: bottomCenter,
+      lines: contents,
+      margin: 3,
+      padding: 1
+    ));
   }
 
   CycleData _cycle0;
@@ -567,10 +876,30 @@ class Dishwasher {
       case 4: oldCycle = _cycle4; _cycle4 = data; break;
     }
     if (oldCycle != data)
-      _dirty = true;
+      _dirtyLog = true;
   }
 
-  void printCycles() {
+  static final _internalsBox = new DoubleLineBox();
+  void printInternals() {
+    final List<String> lines = <String>[];
+    if (personality != null)
+      lines.add('Personality: $personality.');
+    if (rates != null)
+      lines.add('$rates');
+    if (errorState != null)
+      lines.add('$errorState');
+    if (noDryDrainState != null)
+      lines.add('Dry drain state: $noDryDrainState');
+    if (continuousCycleState != null)
+      lines.add('Continuous cycle mode: $continuousCycleState');
+    if (controlLocked == true)
+      lines.add('Control Locks: Locked (?)');
+    print(_internalsBox.buildBox(
+      lines: lines
+    ));
+  }
+
+  void printLog() {
     final List<CycleData> cycles = <CycleData>[
       _cycle0,
       _cycle1,
@@ -578,17 +907,24 @@ class Dishwasher {
       _cycle3,
       _cycle4,
     ];
-    cycles.sort((CycleData a, CycleData b) => (a?.startTime ?? Duration.ZERO).compareTo(b?.startTime ?? Duration.ZERO));
+    cycles.sort((CycleData a, CycleData b) => (b?.startTime ?? Duration.ZERO).compareTo(a?.startTime ?? Duration.ZERO));
     print('Cycle log (most recent first):');
     for (CycleData cycle in cycles)
       print('  $cycle');
   }
 
   void checkDirty() {
-    if (_dirty) {
+    if (_dirtyInternals) {
+      printInternals();
+      _dirtyInternals = false;
+    }
+    if (_dirtyUI) {
       printInterface();
-      printCycles();
-      _dirty = false;
+      _dirtyUI = false;
+    }
+    if (_dirtyLog) {
+      printLog();
+      _dirtyLog = false;
     }
   }
 }
