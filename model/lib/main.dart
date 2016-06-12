@@ -34,7 +34,9 @@ void updateDisplay(bool ansiEnabled) {
   if (ansiEnabled) {
     if (dishwasher.isDirty) {
       stdout.write('\u001B[H'); // clear screen and move cursor to top left
-      dishwasher.printEverything();
+      printClear('GE GDF570SGFWW dishwasher model');
+      printClear('▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔');
+      dishwasher.printEverything(); // calls printClear below
       stdout.write('\u001B[J');
     }
   } else {
@@ -42,8 +44,9 @@ void updateDisplay(bool ansiEnabled) {
   }
 }
 
-void printClear(String s) {
-  stdout.write('$s\u001B[K\n');
+void printClear(String lines) {
+  for (String line in lines.split('\n'))
+    stdout.write('$line\u001B[K\n');
 }
 
 void handleWebSocketMessage(dynamic message, bool ansiEnabled) {

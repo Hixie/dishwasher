@@ -1023,8 +1023,10 @@ class Dishwasher {
   bool enableNotifications = false;
 
   void notify(String s) {
-    if (enableNotifications)
-      writeln('$s\n');
+    if (enableNotifications) {
+      writeln('$s');
+      writeln('');
+    }
   }
 
   bool get isDirty => _dirtyInternals || _dirtyUI || _dirtyLog;
