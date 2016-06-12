@@ -76,13 +76,13 @@ const Map<int, String> kCycleStepDescriptions = const <int, String>{
   (0 << kCycle) + 0: 'boost autosense program? prewash? 0:0',
   (0 << kCycle) + 1: 'boost autosense program? prewash? 0:1',
   (0 << kCycle) + 8: 'boost autosense program? main wash? 0:8',
-  (0 << kCycle) + 9: 'boost autosense program? main wash? 0:9',
+  (0 << kCycle) + 9: 'boost autosense program? main wash? 0:9', // at this point, the soap was opened, though it didn't fall out. error 96 was reported.
   (0 << kCycle) + 10: 'boost autosense program? main wash? 0:10',
   (0 << kCycle) + 13: 'boost autosense program? rinsing? 0:13',
   (0 << kCycle) + 14: 'boost autosense program? rinsing? 0:14',
   
   // seen in autosense mode with Sanitize and Heated Dry together
-  (2 << kCycle) + 0: 'autosense program 2:0', // 2ish minutes -> 2:1
+  (2 << kCycle) + 0: 'autosense program? startup? 2:0', // 2ish minutes -> 2:1
   (2 << kCycle) + 1: 'autosense program 2:1', // 1ish minutes -> 21:0
   (2 << kCycle) + 7: 'autosense program 2:7', // -> 2:8
   (2 << kCycle) + 8: 'autosense program 2:8', // -> 2:9
@@ -105,7 +105,8 @@ const Map<int, String> kCycleStepDescriptions = const <int, String>{
   (6 << kCycle) + 16: 'normal program? rinsing and reducing turbidity? 6:16',
 
   // seen in light mode
-  (11 << kCycle) + 0: 'light program? 11:0', // need to examine steps
+  (11 << kCycle) + 1: 'light program? startup?', // need to examine steps
+  (11 << kCycle) + 13: 'light program, rinsing, spinning 11:13', // checked by opening mid-cycle
   
   (15 << kCycle) + 1: 'filling for prewash? 15:1',
 
@@ -186,7 +187,7 @@ String describeDuration(Duration duration) {
     result += '${duration.inHours}h ';
     duration -= new Duration(hours: duration.inHours);
   }
-  if (duration.inMinutes > 0 || result != '') {
+  if (duration.inMinutes > 0 || result != '' || duration == Duration.ZERO) {
     result += '${duration.inMinutes}m';
     duration -= new Duration(minutes: duration.inMinutes);
   }
@@ -274,8 +275,22 @@ class CycleData {
   final bool active;
   final Duration duration;
 
-  String toString() {
+  bool get justBegan {
+    return minimumTemperature == null
+        && maximumTemperature == null
+        && lastTemperature == null
+        && minimumTurbidity == null
+        && maximumTurbidity == null
+        && active
+        && duration == Duration.ZERO;
+  }
+
+  String toString({ DateTime epoch, bool active: false }) {
     final List<String> result = <String>[];
+    if (epoch == null)
+      result.add('Start time offset: t₀+${describeDuration(startTime)}');
+    else
+      result.add('Start time: ${epoch.add(startTime).toLocal()}');
     if (number != 0)
       result.add('number $number');
     assert((minimumTemperature == null) == (maximumTemperature == null));
@@ -283,22 +298,21 @@ class CycleData {
     if (minimumTemperature != null) {
       String temperatures = 'Temperature: $minimumTemperature .. $maximumTemperature';
       if (lastTemperature != null)
-        temperatures += ' (Final: $lastTemperature)';
+        temperatures += '; final: $lastTemperature';
       result.add(temperatures);
     }
     assert((minimumTurbidity == null) == (maximumTurbidity == null));
     if (minimumTurbidity != null)
       result.add('Turbidity: $minimumTurbidity .. $maximumTurbidity');
-    result.add('start time offset: t₀+${describeDuration(startTime)}');
-    String lead;
     if (active) {
-      lead = 'Active:';
-      result.add('Duration: ${describeDuration(duration)} and counting...');
+      if (duration == Duration.ZERO)
+        result.add('Just started...');
+      else
+        result.add('Duration: ${describeDuration(duration)} and counting...');
     } else {
-      lead = 'Completed:';
-      result.add('Duration: ${describeDuration(duration)}');
+      result.add('Duration: ${describeDuration(duration)}.');
     }
-    return '$lead ${result.join("; ")}';
+    return result.join('. ');
   }
 
   @override
@@ -342,6 +356,11 @@ class DishwasherError {
 
   String get errorMessage {
     switch (errorId) {
+      // 96:
+      //  - just after opening the dishwasher mid-rinse, water not drained, cycle canceled
+      //  - just at the start of a main wash, when the soap didn't properly deploy
+      // 99:
+      //  - at the end of a wash cycle
       default: return '<code $errorId>.';
     }
   }
@@ -509,6 +528,8 @@ class ContinuousCycleState {
   );
 }
 
+typedef void CycleTransitionHandler(int step, Duration time, CycleData currentData);
+typedef void PrintHandler(String message);
 
 // DISHWASHER
 // ==========
@@ -560,14 +581,21 @@ class Dishwasher {
   set cycleStep(int value) {
     if (_cycleStep == value)
       return;
-    if (_cycleTimer.isRunning) {
-      print('Cycle step transition. Ran step "${describeCycleStep(cycleStep)}" for ${describeDuration(_cycleTimer.elapsed)}.');
-      print('');
-    }
+    if (_cycleTimer.isRunning)
+      cycleTransition(cycleStep, _cycleTimer.elapsed);
     _cycleTimer.reset();
     _cycleTimer.start();
     _cycleStep = value;
     _dirtyUI = true;
+  }
+
+  CycleTransitionHandler onCycleTransition;
+
+  void cycleTransition(int step, Duration time) {
+    if (onCycleTransition != null)
+      onCycleTransition(step, time, _activeCycle);
+    else
+      notify('Cycle step transition. Ran step "${describeCycleStep(cycleStep)}" for ${describeDuration(_cycleTimer.elapsed)}.');
   }
 
   int get stepsExecuted => _stepsExecuted;
@@ -809,6 +837,55 @@ class Dishwasher {
     _dirtyInternals = true;
   }
 
+  final Set<CycleData> _cycles = new Set<CycleData>();
+  CycleData _activeCycle;
+  int _lastActiveCycleIndex;
+  void setCycle(int cycle, CycleData data, DateTime stamp) {
+    assert(cycle >= 0 && cycle < _cycles.length);
+    assert(data != null);
+    if (data.active && !isIdle && (_activeCycle == null || (_activeCycle.startTime <= data.startTime))) {
+      assert(_lastActiveCycleIndex == null || cycle == _lastActiveCycleIndex);
+      if (_activeCycle == null) {
+        if (data.justBegan)
+          epoch = stamp.subtract(data.startTime);
+      }
+      _activeCycle = data;
+      _lastActiveCycleIndex = cycle;
+      if (data != _activeCycle)
+        _dirtyUI = true;
+    } else {
+      if (cycle == _lastActiveCycleIndex) {
+        assert(data.startTime == _activeCycle.startTime);
+        _activeCycle = null;
+        _lastActiveCycleIndex = null;
+      }
+      if (_cycles.add(data))
+        _dirtyLog = true;
+    }
+  }
+
+  DateTime get epoch => _epoch;
+  DateTime _epoch;
+  set epoch(DateTime value) {
+    if (_epoch == value)
+      return;
+    _epoch = value;
+    notifyEpochEstablished();
+    if (_activeCycle != null)
+      _dirtyUI = true;
+    if (_cycles.isNotEmpty)
+      _dirtyLog = true;
+  }
+
+  void notifyEpochEstablished() {
+    // TODO(ianh): Make a note when the epoch is being _re_established to a different value
+    notify('Dishwasher epoch established: ${epoch.toLocal()}');
+  }
+
+  bool get isRunning => operatingMode == OperatingMode.active;
+  bool get isPaused => operatingMode == OperatingMode.pause;
+  bool get isIdle => !isRunning && !isPaused;
+
   static final _uiBox = new SingleLineBox();
   void printInterface() {
     List<String> settings = <String>[];
@@ -835,11 +912,7 @@ class Dishwasher {
     // CURRENT OPERATING MODE AND CYCLE STATE
     // * Operating mode
     final String operatingModeDescription = kOperatingModeDescriptions[operatingMode] ?? 'Unknown operating mode';
-    final bool dishwasherIdle = operatingMode != OperatingMode.active && operatingMode != OperatingMode.pause;
-    final bool dishwasherHasSelection = !dishwasherIdle;
-    final bool dishwasherRunning = operatingMode == OperatingMode.active;
-    final bool dishwasherPaused = operatingMode == OperatingMode.pause;
-    assert(!dishwasherHasSelection || (dishwasherRunning || dishwasherPaused));
+    assert(isIdle || isRunning || isPaused);
     // * Cycle selection
     final String cycleSelectionDescription = kCycleSelectionDescriptions[cycleSelection] ?? 'Unknown cycle selection';
     // * Cycle state
@@ -848,7 +921,7 @@ class Dishwasher {
     final String cycleStepDescription = describeCycleStep(cycleStep);
     // BOX
     String modeUI;
-    if (dishwasherIdle) {
+    if (isIdle) {
       if (cycleState != CycleState.none) {
         modeUI = 'INCONSISTENT STATE • $operatingModeDescription • $cycleSelectionDescription • $cycleStateDescription • $cycleStepDescription';
       } else if (!kUninterestingIdleCycleStates.contains(cycleStep)) {
@@ -860,7 +933,7 @@ class Dishwasher {
       } else {
         modeUI = '$operatingModeDescription';
       }
-    } else if (dishwasherPaused) {
+    } else if (isPaused) {
       if (cycleSelection == CycleSelection.none || cycleState != CycleState.pause) {
         modeUI = 'INCONSISTENT STATE • $operatingModeDescription • $cycleSelectionDescription • $cycleStateDescription • $cycleStepDescription';
       } else {
@@ -889,14 +962,16 @@ class Dishwasher {
     if (_lastMessageTimestamp != null)
       bottomCenter.add('${_lastMessageTimestamp.toLocal()}');
     final List<String> contents = <String>[settings.join("  ")];
-    if (!dishwasherIdle)
+    if (!isIdle)
       contents.add('Progress: ${ "█" * stepsExecuted }${ "░" * (stepsEstimated - stepsExecuted) } ${(100.0 * stepsExecuted / stepsEstimated).toStringAsFixed(1)}% ($stepsExecuted/$stepsEstimated)');
+    if (_activeCycle != null)
+      contents.add(_activeCycle.toString(epoch: epoch, active: true));
     assert((_countOfCyclesStarted == null) == (_countOfCyclesCompleted == null));
     assert((_countOfCyclesStarted == null) == (_countOfCyclesReset == null));
     if (_countOfCyclesStarted != null)
       contents.add('Cycle counts: $_countOfCyclesStarted started, $_countOfCyclesCompleted completed, $_countOfCyclesReset reset');
     contents.add('Door open/close count: ${ doorCount ?? "unknown" } \t Sensors: ${ graphSensors(_sensors) }');
-    print(_uiBox.buildBox(
+    writeln(_uiBox.buildBox(
       topLeftLabels: topLeft,
       topRightLabels: topRight,
       bottomCenterLabels: bottomCenter,
@@ -904,27 +979,7 @@ class Dishwasher {
       margin: 3,
       padding: 1
     ));
-    print('');
-  }
-
-  CycleData _cycle0;
-  CycleData _cycle1;
-  CycleData _cycle2;
-  CycleData _cycle3;
-  CycleData _cycle4;
-  void setCycle(int cycle, CycleData data) {
-    assert(cycle >= 0 && cycle <= 4);
-    assert(data != null);
-    CycleData oldCycle;
-    switch (cycle) {
-      case 0: oldCycle = _cycle0; _cycle0 = data; break;
-      case 1: oldCycle = _cycle1; _cycle1 = data; break;
-      case 2: oldCycle = _cycle2; _cycle2 = data; break;
-      case 3: oldCycle = _cycle3; _cycle3 = data; break;
-      case 4: oldCycle = _cycle4; _cycle4 = data; break;
-    }
-    if (oldCycle != data)
-      _dirtyLog = true;
+    writeln('');
   }
 
   static final _internalsBox = new DoubleLineBox();
@@ -947,28 +1002,40 @@ class Dishwasher {
       lines.add('Continuous cycle mode: $continuousCycleState');
     if (controlLocked == true)
       lines.add('Control Locks: Locked (?)');
-    print(_internalsBox.buildBox(
+    writeln(_internalsBox.buildBox(
       lines: lines
     ));
-    print('');
+    writeln('');
   }
 
   void printLog() {
-    final List<CycleData> cycles = <CycleData>[
-      _cycle0,
-      _cycle1,
-      _cycle2,
-      _cycle3,
-      _cycle4,
-    ];
-    cycles.sort((CycleData a, CycleData b) => (b?.startTime ?? Duration.ZERO).compareTo(a?.startTime ?? Duration.ZERO));
-    print('Cycle log (most recent first):');
-    for (CycleData cycle in cycles)
-      print('  $cycle');
-    print('');
+    final List<CycleData> cycles = _cycles.toList();
+    cycles.sort((CycleData a, CycleData b) => (b.startTime).compareTo(a.startTime));
+    writeln('Completed cycle log (most recent first):');
+    int index = cycles.length;
+    for (CycleData cycle in cycles) {
+      writeln('${index.toString().padLeft(7)}: ${cycle.toString(epoch: epoch)}');
+      index -= 1;
+    }
+    writeln('');
   }
 
-  void checkDirty() {
+  bool enableNotifications = false;
+
+  void notify(String s) {
+    if (enableNotifications)
+      writeln('$s\n');
+  }
+
+  bool get isDirty => _dirtyInternals || _dirtyUI || _dirtyLog;
+
+  PrintHandler onPrint;
+  void writeln(String message) {
+    if (onPrint != null)
+      onPrint(message);
+  }
+
+  void printUpdates() {
     if (_dirtyInternals) {
       printInternals();
       _dirtyInternals = false;
@@ -982,6 +1049,13 @@ class Dishwasher {
       _dirtyLog = false;
     }
   }
-}
 
-final Dishwasher dishwasher = new Dishwasher();
+  void printEverything() {
+    printInternals();
+    _dirtyInternals = false;
+    printInterface();
+    _dirtyUI = false;
+    printLog();
+    _dirtyLog = false;
+  }
+}

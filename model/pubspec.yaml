@@ -1,3 +1,4 @@
 name: dishwasher_model
 dependencies:
-  
+    args: '>=0.13.4+2'
+

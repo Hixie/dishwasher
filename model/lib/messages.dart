@@ -15,31 +15,31 @@ bool isWord(dynamic value) => value is int && value >= 0 && value <= 65536;
 
 abstract class MessageHandler {
   String get name => runtimeType.toString();
-  void parse(DateTime stamp, String data);
+  void parse(Dishwasher dishwasher, DateTime stamp, String data);
   void parseFail() {
     throw 'Unexpected data from dishwasher.';
   }
 }
 
 abstract class IgnoredMessageHandler extends MessageHandler {
-  void parse(DateTime stamp, String data) {
+  void parse(Dishwasher dishwasher, DateTime stamp, String data) {
     print('$stamp   ignoring field "$name": $data');
   }
 }
 
 abstract class IntHandler<T> extends MessageHandler {
-  void parse(DateTime stamp, String data) {
+  void parse(Dishwasher dishwasher, DateTime stamp, String data) {
     dynamic decodedData = JSON.decode(data);
     verify(decodedData is int);
-    setValue(parseValue(decodedData));
+    setValue(dishwasher, parseValue(decodedData));
   }
 
   T parseValue(int value);
-  void setValue(T value);
+  void setValue(Dishwasher dishwasher, T value);
 }
 
 abstract class BitFieldHandler<T> extends MessageHandler {
-  void parse(DateTime stamp, String data) {
+  void parse(Dishwasher dishwasher, DateTime stamp, String data) {
     dynamic decodedData = JSON.decode(data);
     verify(decodedData is int);
     final Set<T> result = new Set<T>();
@@ -51,11 +51,11 @@ abstract class BitFieldHandler<T> extends MessageHandler {
       bits >>= 1;
       index += 1;
     }
-    setValue(result);
+    setValue(dishwasher, result);
   }
 
   T parseBit(int bit);
-  void setValue(Set<T> value);
+  void setValue(Dishwasher dishwasher, Set<T> value);
 }
 
 // CONCRETE HANDLERS
@@ -67,7 +67,7 @@ class DefaultHandler extends IgnoredMessageHandler {
 }
 
 class UserConfigurationHandler extends MessageHandler {
-  void parse(DateTime stamp, String data) {
+  void parse(Dishwasher dishwasher, DateTime stamp, String data) {
     dynamic decodedData = JSON.decode(data);
     verify(decodedData is List<dynamic>);
     verify(decodedData.length == 3);
@@ -144,7 +144,7 @@ class CycleDataHandler extends MessageHandler {
   final int _cycle;
   String get name => 'cycleData$_cycle';
 
-  void parse(DateTime stamp, String data) {
+  void parse(Dishwasher dishwasher, DateTime stamp, String data) {
     dynamic decodedData = JSON.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'cycleData$_cycle data not a map');
     verify(decodedData['cycleNumber'] is int, 'cycleData$_cycle.cycleNumber not a number');
@@ -174,7 +174,7 @@ class CycleDataHandler extends MessageHandler {
       active: decodedData['cycleCompleted'] == 0,
       duration: new Duration(minutes: decodedData['cycleDurationInMinutes'])
     );
-    dishwasher.setCycle(_cycle, cycleData);
+    dishwasher.setCycle(_cycle, cycleData, stamp);
   }
 }
 
@@ -198,7 +198,7 @@ class OperatingModeHandler extends IntHandler<OperatingMode> {
   }
 
   @override
-  void setValue(OperatingMode value) {
+  void setValue(Dishwasher dishwasher, OperatingMode value) {
     dishwasher.operatingMode = value;
   }
 }
@@ -222,13 +222,13 @@ class CycleStateHandler extends IntHandler<CycleState> {
   }
 
   @override
-  void setValue(CycleState value) {
+  void setValue(Dishwasher dishwasher, CycleState value) {
     dishwasher.cycleState = value;
   }
 }
 
 class CycleStatusHandler extends MessageHandler {
-  void parse(DateTime stamp, String data) {
+  void parse(Dishwasher dishwasher, DateTime stamp, String data) {
     dynamic decodedData = JSON.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'cycleStatus data not a map');
     verify(decodedData['cycleRunning'] is int, 'cycleStatus.cycleRunning not a number');
@@ -260,7 +260,7 @@ class DoorCountHandler extends IntHandler<int> {
   int parseValue(int value) => value;
 
   @override
-  void setValue(int value) {
+  void setValue(Dishwasher dishwasher, int value) {
     dishwasher.doorCount = value;
   }
 }
@@ -274,13 +274,13 @@ class RemindersHandler extends BitFieldHandler<DishwasherReminders> {
       default: parseFail(); return null;
     }
   }
-  void setValue(Set<DishwasherReminders> value) {
+  void setValue(Dishwasher dishwasher, Set<DishwasherReminders> value) {
     dishwasher.reminders = value;
   }
 }
 
 class CycleCountsHandler extends MessageHandler {
-  void parse(DateTime stamp, String data) {
+  void parse(Dishwasher dishwasher, DateTime stamp, String data) {
     dynamic decodedData = JSON.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'cycleCounts data not a map');
     verify(decodedData['startedCount'] is int, 'cycleCounts.startedCount not a number');
@@ -293,7 +293,7 @@ class CycleCountsHandler extends MessageHandler {
 }
 
 class ErrorsHandler extends MessageHandler {
-  void parse(DateTime stamp, String data) {
+  void parse(Dishwasher dishwasher, DateTime stamp, String data) {
     dynamic decodedData = JSON.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'error data not a map');
     verify(decodedData['errorId'] is int, 'errors.errorId not a number');
@@ -303,7 +303,7 @@ class ErrorsHandler extends MessageHandler {
 }
 
 class RatesHandler extends MessageHandler {
-  void parse(DateTime stamp, String data) {
+  void parse(Dishwasher dishwasher, DateTime stamp, String data) {
     dynamic decodedData = JSON.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'rates data not a map');
     verify(decodedData['fillRate'] is int, 'rates.fillRate not a number');
@@ -316,7 +316,7 @@ class RatesHandler extends MessageHandler {
 }
 
 class ContinuousCycleHandler extends MessageHandler {
-  void parse(DateTime stamp, String data) {
+  void parse(Dishwasher dishwasher, DateTime stamp, String data) {
     dynamic decodedData = JSON.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'continuousCycle data not a map');
     verify(decodedData['cycleToRun'] is int, 'continuousCycle.cycleToRun not a number');
@@ -331,7 +331,7 @@ class ContinuousCycleHandler extends MessageHandler {
 }
 
 class AnalogDataHandler extends MessageHandler {
-  void parse(DateTime stamp, String data) {
+  void parse(Dishwasher dishwasher, DateTime stamp, String data) {
     dynamic decodedData = JSON.decode(data);
     verify(decodedData is List<dynamic>, 'analog data data not a list');
     verify(decodedData.length == 12, 'analog data data not a list of twelve values');
@@ -341,7 +341,7 @@ class AnalogDataHandler extends MessageHandler {
 }
 
 class DryDrainCountersHandler extends MessageHandler {
-  void parse(DateTime stamp, String data) {
+  void parse(Dishwasher dishwasher, DateTime stamp, String data) {
     dynamic decodedData = JSON.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'dryDrainCounters data not a map');
     verify(decodedData['noDryDrainDetectedCount'] is int, 'dryDrainCounters.noDryDrainDetectedCount not a number');
@@ -351,7 +351,7 @@ class DryDrainCountersHandler extends MessageHandler {
 }
 
 class PersonalityHandler extends MessageHandler {
-  void parse(DateTime stamp, String data) {
+  void parse(Dishwasher dishwasher, DateTime stamp, String data) {
     dynamic decodedData = JSON.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'personality data not a map');
     verify(decodedData['personality'] is int, 'personality.personality not a number');
@@ -380,7 +380,7 @@ class DisabledFeaturesHandler extends BitFieldHandler<DishwasherFeatures> {
       default: parseFail(); return null;
     }
   }
-  void setValue(Set<DishwasherFeatures> value) {
+  void setValue(Dishwasher dishwasher, Set<DishwasherFeatures> value) {
     dishwasher.disabledFeatures = value;
   }
 }
@@ -396,7 +396,7 @@ class ControlLockHandler extends IntHandler<bool> {
   }
 
   @override
-  void setValue(bool value) {
+  void setValue(Dishwasher dishwasher, bool value) {
     dishwasher.controlLocked = value;
   }
 }
