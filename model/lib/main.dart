@@ -9,35 +9,50 @@ import 'model.dart';
 Stopwatch staleness = new Stopwatch();
 Timer dirtyTimer;
 
-const Duration kCoallesceDelay = const Duration(milliseconds: 1500);
+const Duration kCoallesceDelay = const Duration(milliseconds: 500);
 const Duration kMaxStaleness = const Duration(milliseconds: 3500);
 
 final Dishwasher dishwasher = new Dishwasher();
 
-void processMessage(String message) {
-  List<String> parts = message.split('\x00');
-  DateTime stamp;
-  try {
-    verify(parts.length == 3, 'Invalid message (${parts.length} parts): "$message"');
-    stamp = new DateTime.fromMillisecondsSinceEpoch(int.parse(parts[0], radix: 10), isUtc: true);
-    assert(stamp.compareTo(dishwasher.lastMessageTimestamp) >= 0);
-    MessageHandler handler = handlers[parts[1]] ?? new DefaultHandler(parts[1]);
-    handler.parse(dishwasher, stamp, parts[2]);
-    dishwasher.lastMessageTimestamp = stamp;
-  } catch (e) {
-    print('$stamp   ${parts[1]}  ${parts[2]}');
-    print('${ " " * stamp.toString().length }   unable to parse: $e');
+class LogMessage {
+  LogMessage(this.stamp, this.handler, this.payload, { this.messageName });
+  factory LogMessage.fromLogLine(String message) {
+    try {
+      final List<String> parts = message.split('\x00');
+      verify(parts.length == 3, 'Invalid message (${parts.length} parts): "$message"');
+      DateTime stamp = new DateTime.fromMillisecondsSinceEpoch(int.parse(parts[0], radix: 10), isUtc: true);
+      if (dishwasher.lastMessageTimestamp != null && stamp.compareTo(dishwasher.lastMessageTimestamp) < 0)
+        return null; // ignore old messages
+      final MessageHandler handler = handlers[parts[1]] ?? new DefaultHandler(parts[1]);
+      return new LogMessage(stamp, handler, parts[2], messageName: parts[1]);
+    } catch (e, stack) {
+      print('unable to parse: $message\n$e\n$stack');
+    }
+    return null;
+  }
+  final DateTime stamp;
+  final MessageHandler handler;
+  final String payload;
+  final String messageName;
+  void dispatch(Dishwasher dishwasher) {
+    try {
+      dishwasher.lastMessageTimestamp = stamp;  
+      handler.parse(dishwasher, stamp, payload);
+    } catch (e, stack) {
+      print('$stamp   $messageName  $payload');
+      print('${ " " * stamp.toString().length }   unable to parse: $e\n$stack');
+    }
   }
 }
 
 void updateDisplay(bool ansiEnabled) {
   if (ansiEnabled) {
     if (dishwasher.isDirty) {
-      stdout.write('\u001B[H'); // clear screen and move cursor to top left
+      stdout.write('\u001B[?25l\u001B[H'); // hide cursor, and move cursor to top left
       printClear('GE GDF570SGFWW dishwasher model');
       printClear('▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔');
       dishwasher.printEverything(); // calls printClear below
-      stdout.write('\u001B[J');
+      stdout.write('\u001B[J\u001B[?25h'); // clear rest of screen, and show cursor again
     }
   } else {
     dishwasher.printUpdates();
@@ -49,11 +64,21 @@ void printClear(String lines) {
     stdout.write('$line\u001B[K\n');
 }
 
+void configureDishwasherOutput(Dishwasher dishwasher, bool ansiEnabled) {
+  if (ansiEnabled) {
+    dishwasher.enableNotifications = false;
+    dishwasher.onPrint = printClear;
+  } else {
+    dishwasher.enableNotifications = true;
+    dishwasher.onPrint = print;
+  }
+}
+
 void handleWebSocketMessage(dynamic message, bool ansiEnabled) {
   if (message is! String)
     return;
-  processMessage(message);
-  if (staleness.elapsed > kMaxStaleness || ansiEnabled) {
+  new LogMessage.fromLogLine(message)?.dispatch(dishwasher);
+  if (staleness.elapsed > kMaxStaleness) {
     dirtyTimer?.cancel();
     dirtyTimer = null;
     updateDisplay(ansiEnabled);
@@ -63,15 +88,12 @@ void handleWebSocketMessage(dynamic message, bool ansiEnabled) {
   }
 }
 
+const int port = 2000;
+
 void startServer(bool ansiEnabled) {
   print('Starting server...\n');
-  if (ansiEnabled) {
-    dishwasher.onPrint = printClear;
-  } else {
-    dishwasher.enableNotifications = true;
-    dishwasher.onPrint = print;
-  }
-  HttpServer.bind('127.0.0.1', 2000)
+  configureDishwasherOutput(dishwasher, ansiEnabled);
+  HttpServer.bind('127.0.0.1', port)
     .then((HttpServer server) {
       server.listen((HttpRequest request) {
         WebSocketTransformer.upgrade(
@@ -88,7 +110,7 @@ void startServer(bool ansiEnabled) {
 
 final RegExp logFile = new RegExp(r'^sending to model: (.+)$');
 
-void readLogs(List<String> arguments) {
+void readLogs(List<String> arguments, { bool ansiEnabled: false, bool verbose: false }) {
   print('Loading archived logs...');
   for (String pathName in arguments) {
     final Directory directory = new Directory(pathName);
@@ -99,7 +121,17 @@ void readLogs(List<String> arguments) {
       for (String line in entry.readAsLinesSync()) {
         final Match parts = logFile.matchAsPrefix(line);
         if (parts != null) {
-          processMessage(parts.group(1));
+          final LogMessage message = new LogMessage.fromLogLine(parts.group(1));
+          if (message != null) {
+            if (dishwasher.lastMessageTimestamp != null) {
+              assert(message.stamp.compareTo(dishwasher.lastMessageTimestamp) >= 0);
+              if (verbose) {
+                if (message.stamp.difference(dishwasher.lastMessageTimestamp) >= kCoallesceDelay)
+                  updateDisplay(ansiEnabled);
+              }
+            }
+            message.dispatch(dishwasher);
+          }
         }
       }
     }
@@ -107,13 +139,25 @@ void readLogs(List<String> arguments) {
 }
 
 const String kColorArgument = 'ansi';
+const String kServerArgument = 'server';
+const String kVerboseLogsArgument = 'show-logs';
 
 void main(List<String> arguments) {
   print('GE GDF570SGFWW dishwasher model');
   print('▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔');
   final ArgParser parser = new ArgParser()
-    ..addFlag(kColorArgument, help: 'Enable ANSI codes', defaultsTo: false);
+    ..addFlag(kColorArgument, help: 'Enable ANSI codes.', defaultsTo: false)
+    ..addFlag(kServerArgument, help: 'Listen for further messages using a WebSocket on port $port.', defaultsTo: true)
+    ..addFlag(kVerboseLogsArgument, help: 'Show updates when parsing logs.', defaultsTo: false);
   final ArgResults parsedArguments = parser.parse(arguments);
-  readLogs(parsedArguments.rest);
-  startServer(parsedArguments[kColorArgument]);
+  final bool ansiEnabled = parsedArguments[kColorArgument];
+  if (parsedArguments[kVerboseLogsArgument]) {
+    configureDishwasherOutput(dishwasher, ansiEnabled);
+    readLogs(parsedArguments.rest, ansiEnabled: ansiEnabled, verbose: true);
+  } else {
+    readLogs(parsedArguments.rest, ansiEnabled: ansiEnabled);
+  }
+  print('Log parsing complete.');
+  if (parsedArguments[kServerArgument])
+    startServer(ansiEnabled);
 }

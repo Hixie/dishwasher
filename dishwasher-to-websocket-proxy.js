@@ -9,7 +9,9 @@ function assert(condition) {
 }
 
 var reconnectTimeout = 2000; // milliseconds between connections to websocket server
+
 var delayTime = 1000; // milliseconds between messages to dishwasher
+var readAllInterval = 60 * 1000; // milliseconds between when we try to request every message at once
 
 
 // WEBSOCKET LOGIC
@@ -179,4 +181,4 @@ greenBean.connect("dishwasher", function(dw) {
   }
 });
 
-setInterval(readAll, 60 * 1000);
+setInterval(readAll, readAllInterval);

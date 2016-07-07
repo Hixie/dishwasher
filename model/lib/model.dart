@@ -32,7 +32,7 @@ const Map<UserCycleSelection, String> kUserCycleSelectionDescriptions = const <U
   UserCycleSelection.light: 'Light',
 };
 
-enum OperatingMode { lowPower, powerUp, standBy, delayStart, pause, active, endOfCycle, downloadMode, sensorCheckMode, loadActivationMode, invalidConnection }
+enum OperatingMode { lowPower, powerUp, standBy, delayStart, pause, active, endOfCycle, downloadMode, sensorCheckMode, loadActivationMode, machineControlOnly }
 const Map<OperatingMode, String> kOperatingModeDescriptions = const <OperatingMode, String>{
   OperatingMode.lowPower: 'Low power',
   OperatingMode.powerUp: 'Power up',
@@ -44,8 +44,15 @@ const Map<OperatingMode, String> kOperatingModeDescriptions = const <OperatingMo
   OperatingMode.downloadMode: 'Download mode',
   OperatingMode.sensorCheckMode: 'Sensor check mode',
   OperatingMode.loadActivationMode: 'Load activation mode',
-  OperatingMode.invalidConnection: 'Invalid connection',
+  OperatingMode.machineControlOnly: 'Machine control only',
 };
+
+final Set<OperatingMode> kInactiveOperatingModes = new Set<OperatingMode>.from(const <OperatingMode>[
+  OperatingMode.lowPower,
+  OperatingMode.powerUp,
+  OperatingMode.standBy,
+  OperatingMode.delayStart,
+]);
 
 enum CycleSelection { none, autosense, heavy, normal, light }
 const Map<CycleSelection, String> kCycleSelectionDescriptions = const <CycleSelection, String>{
@@ -155,6 +162,7 @@ const Map<int, String> kCycleStepDescriptions = const <int, String>{
 
   (63 << kCycle) + 4: 'idle standby with sanitize light? 63:4',
 
+  (66 << kCycle) + 3: 'rebooted', // seen just after being power-cycled
   (66 << kCycle) + 4: 'cycle finished', // -> end; not heated dry
 
   (71 << kCycle) + 0: 'second steam program? 71:0',
@@ -169,11 +177,16 @@ const Map<int, String> kCycleStepDescriptions = const <int, String>{
   (75 << kCycle) + 2: 'preinitialized draining cycle, draining until empty 75:3', // -> 59:0
 };
 
-final Set<int> kUninterestingIdleCycleStates = new Set<int>.from(<int>[
-  (66 << kCycle) + 4,
+final Set<int> kEndOfCycleStates = new Set<int>.from(const <int>[
+  null, // no data
+  (52 << kCycle) + 2, // heated end state
+  (66 << kCycle) + 3, // non-heated end state
+  (66 << kCycle) + 4, // non-heated end state
 ]);
 
 String describeCycleStep(int cycleStep) {
+  if (cycleStep == null)
+    return 'unknown cycle step';
   return kCycleStepDescriptions[cycleStep] ?? "${cycleStep >> kCycle}:${cycleStep & ~((~0) << kCycle)} ??";
 }
 
@@ -252,7 +265,22 @@ class Turbidity {
   int get hashCode => ntu.hashCode;
 }
 
-class CycleData {
+abstract class EventData {
+  const EventData();
+  DateTime time({ DateTime epoch });
+  String toString({ DateTime epoch });
+}
+
+class PowerUpData extends EventData {
+  const PowerUpData(this.powerUpTime);
+  final DateTime powerUpTime;
+  DateTime time({ DateTime epoch }) => powerUpTime;
+  String toString({ DateTime epoch }) {
+    return 'Booted at: ${powerUpTime.toLocal()}';
+  }
+}
+
+class CycleData extends EventData {
   const CycleData({
     this.number,
     this.minimumTemperature,
@@ -275,6 +303,12 @@ class CycleData {
   final bool active;
   final Duration duration;
 
+  DateTime time({ DateTime epoch }) {
+    if (epoch == null)
+      return new DateTime.fromMicrosecondsSinceEpoch(startTime.inMicroseconds, isUtc: true);
+    return epoch.add(startTime);
+  }
+
   bool get justBegan {
     return minimumTemperature == null
         && maximumTemperature == null
@@ -288,9 +322,9 @@ class CycleData {
   String toString({ DateTime epoch, bool active: false }) {
     final List<String> result = <String>[];
     if (epoch == null)
-      result.add('Start time offset: t₀+${describeDuration(startTime)}');
+      result.add('Cycle started with time offset: t₀+${describeDuration(startTime)}');
     else
-      result.add('Start time: ${epoch.add(startTime).toLocal()}');
+      result.add('Cycle started at: ${epoch.add(startTime).toLocal()}');
     if (number != 0)
       result.add('number $number');
     assert((minimumTemperature == null) == (maximumTemperature == null));
@@ -356,19 +390,21 @@ class DishwasherError {
 
   String get errorMessage {
     switch (errorId) {
-      // 96:
-      //  - just after opening the dishwasher mid-rinse, water not drained, cycle canceled
-      //  - just at the start of a main wash, when the soap didn't properly deploy
-      // 99:
+      case 0: return 'no error';
+      case 96: return 'no water in tub'; // experimental error code
+      case 97: return 'water was not hot enough for several consecutive cycles in a row';
+      // case 99: ?
       //  - at the end of a wash cycle
-      default: return '<code $errorId>.';
+      default: return '<code $errorId>';
     }
   }
 
+  bool get isInteresting => errorId != 0;
+
   String toString() {
     if (active)
-      return 'ERROR: $errorMessage';
-    return 'Last error: $errorMessage';
+      return 'ERROR: $errorMessage.';
+    return 'Last error: $errorMessage.';
   }
 
   @override
@@ -433,21 +469,21 @@ class Personality {
 
   String get boardDescription {
     switch (boardId) {
-      case 15: return 'no UI personality installed';
+      case 15: return 'machine-control-driven UI board';
       default: return '<unknown personality $boardId>';
     }
   }
 
   String get sourceDescription {
     switch (source) {
-      case PersonalitySource.bootloaderParametric: return 'bootloader parametric';
-      case PersonalitySource.AD: return 'A/D';
+      case PersonalitySource.bootloaderParametric: return 'factory-configured bootloader parametric';
+      case PersonalitySource.AD: return 'board jumper configuration';
     }
     return '<unknown source $source>';
   }
 
   String toString() {
-    return '$sourceDescription specified $boardDescription';
+    return '$boardDescription (specified by $sourceDescription)';
   }
 
   @override
@@ -472,11 +508,11 @@ class DishwasherRates {
     this.drain
   });
 
-  final int fill;
-  final int drain;
+  final double fill; // L/s
+  final double drain; // L/s
 
   String toString() {
-    return 'Fill rate: $fill. Drain rate: $drain.';
+    return 'Fill rate: ${(fill * 1000.0).toStringAsFixed(1)}ml/s. Drain rate: ${(drain*1000).toStringAsFixed(1)}ml/s.';
   }
 
   @override
@@ -574,17 +610,18 @@ class Dishwasher {
     _dirtyUI = true;
   }
 
-  Stopwatch _cycleTimer = new Stopwatch();
+  DateTime _lastCycleStartTimestamp;
 
   int get cycleStep => _cycleStep;
-  int _cycleStep = 0;
+  int _cycleStep;
   set cycleStep(int value) {
     if (_cycleStep == value)
       return;
-    if (_cycleTimer.isRunning)
-      cycleTransition(cycleStep, _cycleTimer.elapsed);
-    _cycleTimer.reset();
-    _cycleTimer.start();
+    if (cycleStep != null) {
+      if (_lastCycleStartTimestamp != null)
+        cycleTransition(cycleStep, lastMessageTimestamp.difference(_lastCycleStartTimestamp));
+      _lastCycleStartTimestamp = lastMessageTimestamp;
+    }
     _cycleStep = value;
     _dirtyUI = true;
   }
@@ -595,7 +632,7 @@ class Dishwasher {
     if (onCycleTransition != null)
       onCycleTransition(step, time, _activeCycle);
     else
-      notify('Cycle step transition. Ran step "${describeCycleStep(cycleStep)}" for ${describeDuration(_cycleTimer.elapsed)}.');
+      notify('Cycle step transition. Ran step "${describeCycleStep(step)}" for ${describeDuration(time)}.');
   }
 
   int get stepsExecuted => _stepsExecuted;
@@ -634,14 +671,23 @@ class Dishwasher {
     _dirtyUI = true;
   }
 
-  int get countOfCyclesReset => _countOfCyclesReset;
-  int _countOfCyclesReset;
-  set countOfCyclesReset(int value) {
-    if (_countOfCyclesReset == value)
+  final Set<PowerUpData> _powerEvents = new Set<PowerUpData>();
+
+  int get powerOnCounter => _powerOnCounter;
+  int _powerOnCounter;
+  DateTime _lastPowerOnEvent;
+  set powerOnCounter(int value) {
+    if (_powerOnCounter == value)
       return;
-    _countOfCyclesReset = value;
+    if (_powerOnCounter != null && value > _powerOnCounter) {
+      _powerEvents.add(new PowerUpData(lastMessageTimestamp));
+      _lastPowerOnEvent = lastMessageTimestamp;
+    }
+    _powerOnCounter = value;
     _dirtyUI = true;
   }
+
+  String get uptime => _lastPowerOnEvent != null ? describeDuration(lastMessageTimestamp.difference(_lastPowerOnEvent)) : 'unknown';
 
   WashTemperature get washTemperature => _washTemperature;
   WashTemperature _washTemperature = WashTemperature.normal;
@@ -841,13 +887,14 @@ class Dishwasher {
   CycleData _activeCycle;
   int _lastActiveCycleIndex;
   void setCycle(int cycle, CycleData data, DateTime stamp) {
-    assert(cycle >= 0 && cycle < _cycles.length);
+    assert(cycle >= 0);
     assert(data != null);
     if (data.active && !isIdle && (_activeCycle == null || (_activeCycle.startTime <= data.startTime))) {
-      assert(_lastActiveCycleIndex == null || cycle == _lastActiveCycleIndex);
       if (_activeCycle == null) {
-        if (data.justBegan)
-          epoch = stamp.subtract(data.startTime);
+        if (data.justBegan) {
+          // epoch is rounded to the nearest minute because the incoming data isn't more accurate than that
+          epoch = new DateTime.fromMillisecondsSinceEpoch((stamp.subtract(data.startTime).millisecondsSinceEpoch / (60 * 1000)).round() * 60 * 1000);
+        }
       }
       _activeCycle = data;
       _lastActiveCycleIndex = cycle;
@@ -914,7 +961,7 @@ class Dishwasher {
     final String operatingModeDescription = kOperatingModeDescriptions[operatingMode] ?? 'Unknown operating mode';
     assert(isIdle || isRunning || isPaused);
     // * Cycle selection
-    final String cycleSelectionDescription = kCycleSelectionDescriptions[cycleSelection] ?? 'Unknown cycle selection';
+    final String cycleSelectionDescription = kCycleSelectionDescriptions[cycleSelection] ?? 'unknown cycle selection';
     // * Cycle state
     final String cycleStateDescription = kCycleStateDescriptions[cycleState] ?? 'unknown cycle state';
     // * Cycle Phase
@@ -924,14 +971,24 @@ class Dishwasher {
     if (isIdle) {
       if (cycleState != CycleState.none) {
         modeUI = 'INCONSISTENT STATE • $operatingModeDescription • $cycleSelectionDescription • $cycleStateDescription • $cycleStepDescription';
-      } else if (!kUninterestingIdleCycleStates.contains(cycleStep)) {
-        //if (cycleSelection != CycleSelection.none) {
-        //  modeUI = '$operatingModeDescription • last cycle selection: $cycleSelectionDescription • $cycleStepDescription';
-        //} else {
-          modeUI = '$operatingModeDescription • $cycleStepDescription';
-        //}
+      } else if (!kEndOfCycleStates.contains(cycleStep)) {
+        if (operatingMode == OperatingMode.endOfCycle) {
+          modeUI = '$operatingModeDescription • $cycleSelectionDescription • $cycleStepDescription';
+        } else if (kInactiveOperatingModes.contains(operatingMode)) {
+          if (cycleSelection != CycleSelection.none) {
+            modeUI = '$operatingModeDescription • aborted cycle • $cycleSelectionDescription • $cycleStepDescription';
+          } else {
+            modeUI = '$operatingModeDescription • aborted cycle • $cycleStepDescription';
+          }
+        } else {
+          if (cycleSelection != CycleSelection.none) {
+            modeUI = 'INCONSISTENT STATE • $operatingModeDescription • $cycleSelectionDescription • $cycleStepDescription';
+          } else {
+            modeUI = 'INCONSISTENT STATE • $operatingModeDescription • $cycleStepDescription';
+          }
+        }
       } else {
-        modeUI = '$operatingModeDescription';
+        modeUI = '$operatingModeDescription • $cycleStepDescription';
       }
     } else if (isPaused) {
       if (cycleSelection == CycleSelection.none || cycleState != CycleState.pause) {
@@ -940,7 +997,7 @@ class Dishwasher {
         modeUI = 'PAUSED • $cycleSelectionDescription • $cycleStepDescription';
       }
     } else {
-      if (cycleSelection == CycleSelection.none || cycleState == CycleState.none || kUninterestingIdleCycleStates.contains(cycleStep)) {
+      if (cycleSelection == CycleSelection.none || cycleState == CycleState.none || kEndOfCycleStates.contains(cycleStep)) {
         modeUI = 'INCONSISTENT STATE • $operatingModeDescription • $cycleSelectionDescription • $cycleStateDescription • $cycleStepDescription';
       } else {
         modeUI = '$operatingModeDescription • $cycleSelectionDescription • $cycleStateDescription • $cycleStepDescription';
@@ -967,10 +1024,14 @@ class Dishwasher {
     if (_activeCycle != null)
       contents.add(_activeCycle.toString(epoch: epoch, active: true));
     assert((_countOfCyclesStarted == null) == (_countOfCyclesCompleted == null));
-    assert((_countOfCyclesStarted == null) == (_countOfCyclesReset == null));
+    assert((_countOfCyclesStarted == null) == (_powerOnCounter == null));
+    if (errorState != null && errorState.isInteresting)
+      contents.add('$errorState');
     if (_countOfCyclesStarted != null)
-      contents.add('Cycle counts: $_countOfCyclesStarted started, $_countOfCyclesCompleted completed, $_countOfCyclesReset reset');
-    contents.add('Door open/close count: ${ doorCount ?? "unknown" } \t Sensors: ${ graphSensors(_sensors) }');
+      contents.add('Cycle count: $_countOfCyclesCompleted cycles completed out of $_countOfCyclesStarted cycles started.');
+    if (powerOnCounter != null)
+      contents.add('Power cycle events: $powerOnCounter.\tUptime: $uptime.');
+    contents.add('Door open/close count: ${ doorCount ?? "unknown" }. \t Sensors: ${ graphSensors(_sensors) }');
     writeln(_uiBox.buildBox(
       topLeftLabels: topLeft,
       topRightLabels: topRight,
@@ -994,8 +1055,6 @@ class Dishwasher {
     }
     if (rates != null)
       lines.add('$rates');
-    if (errorState != null)
-      lines.add('$errorState');
     if (noDryDrainState != null)
       lines.add('Dry drain state: $noDryDrainState');
     if (continuousCycleState != null)
@@ -1009,12 +1068,14 @@ class Dishwasher {
   }
 
   void printLog() {
-    final List<CycleData> cycles = _cycles.toList();
-    cycles.sort((CycleData a, CycleData b) => (b.startTime).compareTo(a.startTime));
-    writeln('Completed cycle log (most recent first):');
-    int index = cycles.length;
-    for (CycleData cycle in cycles) {
-      writeln('${index.toString().padLeft(7)}: ${cycle.toString(epoch: epoch)}');
+    final List<EventData> events = <EventData>[];
+    events.addAll(_cycles);
+    events.addAll(_powerEvents);
+    events.sort((EventData a, EventData b) => (b.time(epoch: epoch)).compareTo(a.time(epoch: epoch)));
+    writeln('Event log (most recent first):');
+    int index = events.length;
+    for (EventData event in events) {
+      writeln('${index.toString().padLeft(7)}: ${event.toString(epoch: epoch)}');
       index -= 1;
     }
     writeln('');

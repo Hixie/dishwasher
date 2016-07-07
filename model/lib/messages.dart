@@ -192,7 +192,7 @@ class OperatingModeHandler extends IntHandler<OperatingMode> {
       case 7: return OperatingMode.downloadMode;
       case 8: return OperatingMode.sensorCheckMode;
       case 9: return OperatingMode.loadActivationMode;
-      case 11: return OperatingMode.invalidConnection;
+      case 11: return OperatingMode.machineControlOnly;
       default: parseFail(); return null;
     }
   }
@@ -288,7 +288,7 @@ class CycleCountsHandler extends MessageHandler {
     verify(decodedData['resetCount'] is int, 'cycleCounts.resetCount not a number');
     dishwasher.countOfCyclesStarted = decodedData['startedCount'];
     dishwasher.countOfCyclesCompleted = decodedData['completedCount'];
-    dishwasher.countOfCyclesReset = decodedData['resetCount'];
+    dishwasher.powerOnCounter = decodedData['resetCount'];
   }
 }
 
@@ -308,9 +308,10 @@ class RatesHandler extends MessageHandler {
     verify(decodedData is Map<dynamic, dynamic>, 'rates data not a map');
     verify(decodedData['fillRate'] is int, 'rates.fillRate not a number');
     verify(decodedData['drainRate'] is int, 'rates.drainRate not a number');
+    // data is in 10000ths of a gallon per second
     dishwasher.rates = new DishwasherRates(
-      fill: decodedData['fillRate'],
-      drain: decodedData['drainRate']
+      fill: decodedData['fillRate'] / (10000.0 * 0.26417),
+      drain: decodedData['drainRate'] / (10000.0 * 0.26417)
     );
   }
 }
