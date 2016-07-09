@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
@@ -13,6 +14,10 @@ const Duration kCoallesceDelay = const Duration(milliseconds: 500);
 const Duration kMaxStaleness = const Duration(milliseconds: 3500);
 
 final Dishwasher dishwasher = new Dishwasher();
+
+enum DishwasherStateSummary { unknown, idle, running }
+
+DishwasherStateSummary mostRecentState = DishwasherStateSummary.unknown;
 
 class LogMessage {
   LogMessage(this.stamp, this.handler, this.payload, { this.messageName });
@@ -88,9 +93,39 @@ void handleWebSocketMessage(dynamic message, bool ansiEnabled) {
   }
 }
 
+void updateRemoteModel(String hubConfiguration) {
+  DishwasherStateSummary oldState = mostRecentState;
+  if (dishwasher.isIdle)
+    mostRecentState = DishwasherStateSummary.idle;
+  else
+    mostRecentState = DishwasherStateSummary.running;
+  if (oldState != mostRecentState) {
+    final List<String> config = new File(hubConfiguration).readAsLinesSync();
+    final String hubServer = config[0];
+    final int port = int.parse(config[1]);
+    final String username = config[2];
+    final String password = config[3];
+    String message;
+    switch (mostRecentState) {
+      case DishwasherStateSummary.idle: message = 'dishwasherIdle'; break;
+      case DishwasherStateSummary.running: message = 'dishwasherRunning'; break;
+      default: message = 'dishwasherConfused'; break;
+    }
+    Socket.connect(hubServer, port).then((Socket socket) {
+      socket
+        ..handleError((e) { print('socket error: $e'); })
+        ..encoding = UTF8
+        ..write('$username\x00$password\x00$message\x00\x00\x00')
+        ..flush().then((IOSink sink) {
+          socket.close();
+        });
+    }, onError: (e) { print('error: $e'); });
+  }
+}
+
 const int port = 2000;
 
-void startServer(bool ansiEnabled) {
+void startServer({ bool ansiEnabled: false, String hubConfiguration }) {
   print('Starting server...\n');
   configureDishwasherOutput(dishwasher, ansiEnabled);
   HttpServer.bind('127.0.0.1', port)
@@ -102,7 +137,11 @@ void startServer(bool ansiEnabled) {
             return 'dishwasher-model';
           }
         ).then((WebSocket websocket) {
-          websocket.listen((dynamic message) { handleWebSocketMessage(message, ansiEnabled); });
+          websocket.listen((dynamic message) {
+            handleWebSocketMessage(message, ansiEnabled);
+            if (hubConfiguration != null)
+              updateRemoteModel(hubConfiguration);
+          });
         });
       });
     }, onError: (error) => print("Error starting server: $error"));
@@ -141,6 +180,7 @@ void readLogs(List<String> arguments, { bool ansiEnabled: false, bool verbose: f
 const String kColorArgument = 'ansi';
 const String kServerArgument = 'server';
 const String kVerboseLogsArgument = 'show-logs';
+const String kHouseHubConfigurationArgument = 'hub-config';
 
 void main(List<String> arguments) {
   print('GE GDF570SGFWW dishwasher model');
@@ -148,7 +188,8 @@ void main(List<String> arguments) {
   final ArgParser parser = new ArgParser()
     ..addFlag(kColorArgument, help: 'Enable ANSI codes.', defaultsTo: false)
     ..addFlag(kServerArgument, help: 'Listen for further messages using a WebSocket on port $port.', defaultsTo: true)
-    ..addFlag(kVerboseLogsArgument, help: 'Show updates when parsing logs.', defaultsTo: false);
+    ..addFlag(kVerboseLogsArgument, help: 'Show updates when parsing logs.', defaultsTo: false)
+    ..addOption(kHouseHubConfigurationArgument, help: 'Configuration file for a house hub to which to forward information (when server enabled).');
   final ArgResults parsedArguments = parser.parse(arguments);
   final bool ansiEnabled = parsedArguments[kColorArgument];
   if (parsedArguments[kVerboseLogsArgument]) {
@@ -158,6 +199,12 @@ void main(List<String> arguments) {
     readLogs(parsedArguments.rest, ansiEnabled: ansiEnabled);
   }
   print('Log parsing complete.');
-  if (parsedArguments[kServerArgument])
-    startServer(ansiEnabled);
+  String hubConfiguration = parsedArguments[kHouseHubConfigurationArgument];
+  if (parsedArguments[kServerArgument]) {
+    startServer(ansiEnabled: ansiEnabled, hubConfiguration: hubConfiguration);
+  } else {
+    configureDishwasherOutput(dishwasher, ansiEnabled);
+    dishwasher.printEverything();
+  }
 }
+

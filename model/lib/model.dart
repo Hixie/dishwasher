@@ -589,6 +589,8 @@ class Dishwasher {
     if (_operatingMode == value)
       return;
     _operatingMode = value;
+    if (isIdle)
+      _concludeCycles();
     _dirtyUI = true;
   }
 
@@ -630,7 +632,7 @@ class Dishwasher {
 
   void cycleTransition(int step, Duration time) {
     if (onCycleTransition != null)
-      onCycleTransition(step, time, _activeCycle);
+      onCycleTransition(step, time, _mostRecentCycle);
     else
       notify('Cycle step transition. Ran step "${describeCycleStep(step)}" for ${describeDuration(time)}.');
   }
@@ -884,30 +886,90 @@ class Dishwasher {
   }
 
   final Set<CycleData> _cycles = new Set<CycleData>();
-  CycleData _activeCycle;
-  int _lastActiveCycleIndex;
-  void setCycle(int cycle, CycleData data, DateTime stamp) {
-    assert(cycle >= 0);
+  CycleData _mostRecentCycle;
+  bool _mostRecentCycleIsStillActive = false;
+  int _mostRecentCycleIndex;
+  void setCycle(int cycleIndex, CycleData data, DateTime stamp) {
+    assert(cycleIndex >= 0);
     assert(data != null);
-    if (data.active && !isIdle && (_activeCycle == null || (_activeCycle.startTime <= data.startTime))) {
-      if (_activeCycle == null) {
-        if (data.justBegan) {
-          // epoch is rounded to the nearest minute because the incoming data isn't more accurate than that
-          epoch = new DateTime.fromMillisecondsSinceEpoch((stamp.subtract(data.startTime).millisecondsSinceEpoch / (60 * 1000)).round() * 60 * 1000);
+    if (!_cycles.contains(data)) {
+      // Either this is an active cycle, or it's old data but we're
+      // still catching up.
+      // We technically have no way to distinguish an abandoned stale cycle 
+      // from one that just started, because the clock in the dishwasher
+      // isn't reliable and sometimes older cycles have more recent times.
+      // So we are forced to use heuristics.
+      // If the cycle is inactive, it's definitely not active.
+      // If the cycle's start time is before the current most-recent cycle,
+      // we'll assume it's not active.
+      // Otherwise we'll assume it's active.
+      final bool isOld = _mostRecentCycle != null && data.startTime < _mostRecentCycle.startTime;
+      final bool inactive = !data.active || isOld;
+      // We'll assume that if a slot is re-used for new data with the same start time,
+      // that this is an update to the active cycle. This is again just a heuristic
+      // as it is not impossible to start and cancel six cycles within a minute...
+      // and we have no reliable way to distinguish that from us having stale data that's
+      // suddenly updated with entirely unrelated cycles, received out of order, with
+      // a suddenly different epoch that happens to land the new cycles to the same
+      // start time.
+      final bool isUpdate = _mostRecentCycleIndex == cycleIndex && data.startTime == _mostRecentCycle.startTime;
+      assert(!isUpdate || !isOld); // they're mutually exclusive.
+      if (inactive) {
+        if (isUpdate) {
+          if (_mostRecentCycleIsStillActive) {
+            // This was our active cycle, but isn't anymore.
+            assert(!data.active);
+            assert(!isOld); // if it was old, then the start times wouldn't match
+            assert(_mostRecentCycleIsStillActive);
+            assert(!_cycles.contains(_mostRecentCycle));
+            _mostRecentCycleIsStillActive = false;
+          } else {
+            // We probably had _concludeCycles called on us before receiving
+            // our final update.
+            assert(_cycles.contains(_mostRecentCycle));
+            _cycles.remove(_mostRecentCycle);
+          }
+          assert(!_mostRecentCycleIsStillActive);
         }
-      }
-      _activeCycle = data;
-      _lastActiveCycleIndex = cycle;
-      if (data != _activeCycle)
-        _dirtyUI = true;
-    } else {
-      if (cycle == _lastActiveCycleIndex) {
-        assert(data.startTime == _activeCycle.startTime);
-        _activeCycle = null;
-        _lastActiveCycleIndex = null;
-      }
-      if (_cycles.add(data))
+        _cycles.add(data);
         _dirtyLog = true;
+      } else {
+        assert(data.active);
+        assert(!isOld);
+        if (isUpdate) {
+          if (!_mostRecentCycleIsStillActive) {
+            // We probably had _concludeCycles called on us before receiving
+            // our final update, and we were abandoned.
+            assert(_cycles.contains(_mostRecentCycle));
+            _cycles.remove(_mostRecentCycle);
+            _cycles.add(data);
+          }
+        } else {
+          _mostRecentCycleIsStillActive = true;
+          _mostRecentCycleIndex = cycleIndex;
+          if (data.justBegan) {
+            // we use this to establish the current epoch
+            // epoch is rounded to the nearest minute because the incoming data isn't more accurate than that
+            epoch = new DateTime.fromMillisecondsSinceEpoch((stamp.subtract(data.startTime).millisecondsSinceEpoch / (60 * 1000)).round() * 60 * 1000);
+          }
+        }
+        assert(_mostRecentCycleIndex == cycleIndex);
+        _mostRecentCycle = data;
+        _dirtyUI = true;
+      }
+    }
+  }
+
+  void _concludeCycles() {
+    assert(isIdle);
+    // If the cycle was abandoned, we won't get an updated cycleData with active=false.
+    if (_mostRecentCycleIsStillActive) {
+if (_mostRecentCycle.maximumTurbidity?.ntu == 1279.0)
+  print('adding because concluded');
+      _cycles.add(_mostRecentCycle);
+      _mostRecentCycleIsStillActive = false;
+      _dirtyLog = true;
+      _dirtyUI = true;
     }
   }
 
@@ -918,7 +980,7 @@ class Dishwasher {
       return;
     _epoch = value;
     notifyEpochEstablished();
-    if (_activeCycle != null)
+    if (_mostRecentCycleIsStillActive)
       _dirtyUI = true;
     if (_cycles.isNotEmpty)
       _dirtyLog = true;
@@ -936,8 +998,10 @@ class Dishwasher {
   static final _uiBox = new SingleLineBox();
   void printInterface() {
     List<String> settings = <String>[];
-    if (delay > 0)
-      settings.add('Delay Hours: ${delay}h');
+    if (delay != null) {
+      if (delay > 0)
+        settings.add('Delay ${delay} Hours');
+    }
     settings.add(kUserCycleSelectionDescriptions[userCycleSelection] ?? 'UNKNOWN CYCLE SELECTION');
     if (steam)
       settings.add('Steam');
@@ -1021,8 +1085,8 @@ class Dishwasher {
     final List<String> contents = <String>[settings.join("  ")];
     if (!isIdle)
       contents.add('Progress: ${ "█" * stepsExecuted }${ "░" * (stepsEstimated - stepsExecuted) } ${(100.0 * stepsExecuted / stepsEstimated).toStringAsFixed(1)}% ($stepsExecuted/$stepsEstimated)');
-    if (_activeCycle != null)
-      contents.add(_activeCycle.toString(epoch: epoch, active: true));
+    if (_mostRecentCycleIsStillActive)
+      contents.add(_mostRecentCycle.toString(epoch: epoch, active: true));
     assert((_countOfCyclesStarted == null) == (_countOfCyclesCompleted == null));
     assert((_countOfCyclesStarted == null) == (_powerOnCounter == null));
     if (errorState != null && errorState.isInteresting)

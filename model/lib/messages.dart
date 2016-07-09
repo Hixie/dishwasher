@@ -82,6 +82,7 @@ class UserConfigurationHandler extends MessageHandler {
       case 1: delay = 2; break;
       case 2: delay = 4; break;
       case 3: delay = 8; break;
+      default: delay = 0; break; // out-of-range values set remotely get treated as zero (or at least, 8 does).
     }
     int zone = (byte1 & 0x30) >> 4;
     if (zone > 0)
