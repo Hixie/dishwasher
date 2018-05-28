@@ -288,7 +288,6 @@ class PowerUpData extends EventData {
 
 class CycleData extends EventData {
   const CycleData({
-    this.number,
     this.minimumTemperature,
     this.maximumTemperature,
     this.lastTemperature,
@@ -299,7 +298,6 @@ class CycleData extends EventData {
     this.duration
   });
 
-  final int number;
   final Temperature minimumTemperature;
   final Temperature maximumTemperature;
   final Temperature lastTemperature;
@@ -331,8 +329,6 @@ class CycleData extends EventData {
       result.add('Cycle started with time offset: t₀+${describeDuration(startTime)}');
     else
       result.add('Cycle started at: ${epoch.add(startTime).toLocal()}');
-    if (number != 0)
-      result.add('number $number');
     assert((minimumTemperature == null) == (maximumTemperature == null));
     assert((lastTemperature == null) || (minimumTemperature != null)); // this failed
     if (minimumTemperature != null) {
@@ -360,8 +356,7 @@ class CycleData extends EventData {
     if (other is! CycleData)
       return false;
     CycleData typedOther = other;
-    return typedOther.number == number
-        && typedOther.minimumTemperature == minimumTemperature
+    return typedOther.minimumTemperature == minimumTemperature
         && typedOther.maximumTemperature == maximumTemperature
         && typedOther.lastTemperature == lastTemperature
         && typedOther.minimumTurbidity == minimumTurbidity
@@ -373,7 +368,6 @@ class CycleData extends EventData {
 
   @override
   int get hashCode => hashValues(
-    number,
     minimumTemperature,
     maximumTemperature,
     lastTemperature,

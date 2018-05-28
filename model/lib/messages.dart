@@ -173,7 +173,7 @@ class CycleDataHandler extends MessageHandler {
       maximumTurbidity: minimumTurbidity <= maximumTurbidity ? new Turbidity.NTU(maximumTurbidity.toDouble()) : null,
       startTime: new Duration(minutes: decodedData['cycleTime']),
       active: decodedData['cycleCompleted'] == 0,
-      duration: new Duration(minutes: cycleNumber << 8 + decodedData['cycleDurationInMinutes'])
+      duration: new Duration(minutes: (cycleNumber << 8) + decodedData['cycleDurationInMinutes'])
     );
     dishwasher.setCycle(_cycle, cycleData, stamp);
   }
