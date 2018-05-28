@@ -575,6 +575,17 @@ var fields = {
 
   'controlLock': reportControlLock, // ???
 
+  // 'modelNumber': report,
+  // 'serialNumber': report,
+  // 'remoteEnable': report,
+  // 'userInterfaceLock': report,
+  // 'clockTime': report,
+  // 'clockFormat': report,
+  // 'temperatureDisplayUnits': report,
+  // 'applianceType': report,
+  // 'sabbathMode': report,
+  // 'soundLevel': report,
+  
   // the following are documented but fail on the GDF570SGFWW or with this SDK (not clear which)
   // 'turbidityCalibration': report,
   // 'diverterCalibration': report,
@@ -631,6 +642,7 @@ function getReader(field, dishwasher) {
 
 var dishwasher;
 greenBean.connect("dishwasher", function(dw) {
+  log('dishwasher connection detected - version=' + dw.version.join('.') + '; address=' + dw.address.toString(16));
   if (dishwasher == null) {
     dw.operatingMode.read(function (value) {
       if (value == 11) {
@@ -640,6 +652,12 @@ greenBean.connect("dishwasher", function(dw) {
         return;
       }
       dishwasher = dw;
+      log('selected dishwasher at address ' + dw.address.toString(16));
+
+      // dishwasher.send(0x01, [], function (data) {
+      //   log("version: " + data);
+      // });
+      
       index = 0;
       for (var field in fields) {
         setTimeout(getReader(field, dw), index * delayTime);

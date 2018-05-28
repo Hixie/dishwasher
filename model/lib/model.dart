@@ -160,9 +160,12 @@ const Map<int, String> kCycleStepDescriptions = const <int, String>{
   (59 << kCycle) + 1: 'sanitizing, raising temperature? 59:1', // -> 59:2
   (59 << kCycle) + 2: 'sanitizing? 59:2', // starting at temp 68.3C? // -> 74:0-3 -> 52:0
 
+  (63 << kCycle) + 3: 'rebooted 63:3', // seen just after being power-cycled
   (63 << kCycle) + 4: 'idle standby with sanitize light? 63:4',
 
-  (66 << kCycle) + 3: 'rebooted', // seen just after being power-cycled
+  (64 << kCycle) + 4: '? 64:4',
+
+  (66 << kCycle) + 3: 'rebooted 66:3', // seen just after being power-cycled
   (66 << kCycle) + 4: 'cycle finished', // -> end; not heated dry
 
   (71 << kCycle) + 0: 'second steam program? 71:0',
@@ -180,6 +183,9 @@ const Map<int, String> kCycleStepDescriptions = const <int, String>{
 final Set<int> kEndOfCycleStates = new Set<int>.from(const <int>[
   null, // no data
   (52 << kCycle) + 2, // heated end state
+  (63 << kCycle) + 3, // rebooted?
+  (63 << kCycle) + 4, // idle standby with sanitize light
+  (64 << kCycle) + 4, // normal end state ?
   (66 << kCycle) + 3, // non-heated end state
   (66 << kCycle) + 4, // non-heated end state
 ]);
@@ -328,7 +334,7 @@ class CycleData extends EventData {
     if (number != 0)
       result.add('number $number');
     assert((minimumTemperature == null) == (maximumTemperature == null));
-    assert((lastTemperature == null) || (minimumTemperature != null));
+    assert((lastTemperature == null) || (minimumTemperature != null)); // this failed
     if (minimumTemperature != null) {
       String temperatures = 'Temperature: $minimumTemperature .. $maximumTemperature';
       if (lastTemperature != null)
@@ -903,8 +909,6 @@ class Dishwasher {
       // If the cycle's start time is before the current most-recent cycle,
       // we'll assume it's not active.
       // Otherwise we'll assume it's active.
-      final bool isOld = _mostRecentCycle != null && data.startTime < _mostRecentCycle.startTime;
-      final bool inactive = !data.active || isOld;
       // We'll assume that if a slot is re-used for new data with the same start time,
       // that this is an update to the active cycle. This is again just a heuristic
       // as it is not impossible to start and cancel six cycles within a minute...
@@ -913,6 +917,8 @@ class Dishwasher {
       // a suddenly different epoch that happens to land the new cycles to the same
       // start time.
       final bool isUpdate = _mostRecentCycleIndex == cycleIndex && data.startTime == _mostRecentCycle.startTime;
+      final bool isOld = !isUpdate && _mostRecentCycle != null && data.startTime < _mostRecentCycle.startTime;
+      final bool inactive = isOld || !data.active;
       assert(!isUpdate || !isOld); // they're mutually exclusive.
       if (inactive) {
         if (isUpdate) {
@@ -964,8 +970,6 @@ class Dishwasher {
     assert(isIdle);
     // If the cycle was abandoned, we won't get an updated cycleData with active=false.
     if (_mostRecentCycleIsStillActive) {
-if (_mostRecentCycle.maximumTurbidity?.ntu == 1279.0)
-  print('adding because concluded');
       _cycles.add(_mostRecentCycle);
       _mostRecentCycleIsStillActive = false;
       _dirtyLog = true;
@@ -1138,9 +1142,13 @@ if (_mostRecentCycle.maximumTurbidity?.ntu == 1279.0)
     events.sort((EventData a, EventData b) => (b.time(epoch: epoch)).compareTo(a.time(epoch: epoch)));
     writeln('Event log (most recent first):');
     int index = events.length;
+    int count = 0;
     for (EventData event in events) {
       writeln('${index.toString().padLeft(7)}: ${event.toString(epoch: epoch)}');
       index -= 1;
+      count += 1;
+      if (count > 20)
+        break;
     }
     writeln('');
   }

@@ -30,8 +30,8 @@ class LogMessage {
         return null; // ignore old messages
       final MessageHandler handler = handlers[parts[1]] ?? new DefaultHandler(parts[1]);
       return new LogMessage(stamp, handler, parts[2], messageName: parts[1]);
-    } catch (e, stack) {
-      print('unable to parse: $message\n$e\n$stack');
+    } catch (e) {
+      print('unable to parse: $message');
     }
     return null;
   }
@@ -43,9 +43,9 @@ class LogMessage {
     try {
       dishwasher.lastMessageTimestamp = stamp;  
       handler.parse(dishwasher, stamp, payload);
-    } catch (e, stack) {
+    } catch (e) {
       print('$stamp   $messageName  $payload');
-      print('${ " " * stamp.toString().length }   unable to parse: $e\n$stack');
+      print('${ " " * stamp.toString().length }   unable to parse: $e');
     }
   }
 }

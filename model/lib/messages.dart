@@ -95,14 +95,14 @@ class UserConfigurationHandler extends MessageHandler {
     switch ((byte2 & 0x0C) >> 2) {
       case 0: dryOptions = DryOptions.idle; break;
       case 1: dryOptions = DryOptions.heated; break;
-      default: parseFail(); // never seen 2 or 3 with this dishwasher
+      default: dryOptions = DryOptions.idle; break; // assuming that 2 and 3 (set remotely) are treated like idle, but not tested
     }
     WashTemperature washTemperature;
     switch ((byte2 & 0x70) >> 4) {
       case 0: washTemperature = WashTemperature.normal; break;
       case 1: washTemperature = WashTemperature.boost; break;
       case 2: washTemperature = WashTemperature.sanitize; break;
-      default: parseFail(); // never seen 3-7 with this dishwasher
+      default: washTemperature = WashTemperature.normal; // assuming that 3-7 (set remotely) are treated like normal, but not tested
     }
     bool rinseAidEnabled = (byte2 & 0x80) > 0; // press Steam five times in a row to toggle
     bool bottleBlast = (byte3 & 0x01) > 0; // not present on this dishwasher
@@ -114,7 +114,7 @@ class UserConfigurationHandler extends MessageHandler {
       case 1: userCycleSelection = UserCycleSelection.heavy; break;
       case 2: userCycleSelection = UserCycleSelection.normal; break;
       case 3: userCycleSelection = UserCycleSelection.light; break;
-      default: parseFail(); // never seen 4-15 with this dishwasher
+      default: userCycleSelection = UserCycleSelection.autosense; break; // assuming that 4-15 (set remotely) are treated like autosense, but not tested
     }
     bool leakDetect = (byte3 & 0x20) > 0; // no way to toggle with this dishwasher
     if (!leakDetect)
@@ -148,7 +148,8 @@ class CycleDataHandler extends MessageHandler {
   void parse(Dishwasher dishwasher, DateTime stamp, String data) {
     dynamic decodedData = JSON.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'cycleData$_cycle data not a map');
-    verify(decodedData['cycleNumber'] is int, 'cycleData$_cycle.cycleNumber not a number');
+    dynamic cycleNumber = decodedData['cycleNumber'] ?? 0;
+    verify(cycleNumber is int, 'cycleData$_cycle.cycleNumber not a number');
     verify(isByte(decodedData['cycleMinimumTemperatureInFahrenheit']), 'cycleData$_cycle.cycleMinimumTemperatureInFahrenheit not a byte');
     verify(isByte(decodedData['cycleMaximumTemperatureInFahrenheit']), 'cycleData$_cycle.cycleMaximumTemperatureInFahrenheit not a byte');
     verify(isByte(decodedData['cycleFinalCirculationTemperatureInFahrenheit']), 'cycleData$_cycle.cycleFinalCirculationTemperatureInFahrenheit not a byte');
@@ -165,15 +166,14 @@ class CycleDataHandler extends MessageHandler {
     final int maximumTurbidity = decodedData['cycleMaximumTurbidityInNTU'];
     verify((minimumTurbidity <= maximumTurbidity) || (minimumTurbidity == 65535 && maximumTurbidity == 0));
     final CycleData cycleData = new CycleData(
-      number: decodedData['cycleNumber'],
-      minimumTemperature: minimumTemperature < maximumTemperature ? new Temperature.F(minimumTemperature.toDouble()) : null,
-      maximumTemperature: minimumTemperature < maximumTemperature ? new Temperature.F(maximumTemperature.toDouble()) : null,
+      minimumTemperature: minimumTemperature <= maximumTemperature ? new Temperature.F(minimumTemperature.toDouble()) : null,
+      maximumTemperature: minimumTemperature <= maximumTemperature ? new Temperature.F(maximumTemperature.toDouble()) : null,
       lastTemperature: finalCirculationTemperature > 0 ? new Temperature.F(finalCirculationTemperature.toDouble()) : null,
-      minimumTurbidity: minimumTurbidity < maximumTurbidity ? new Turbidity.NTU(minimumTurbidity.toDouble()) : null,
-      maximumTurbidity: minimumTurbidity < maximumTurbidity ? new Turbidity.NTU(maximumTurbidity.toDouble()) : null,
+      minimumTurbidity: minimumTurbidity <= maximumTurbidity ? new Turbidity.NTU(minimumTurbidity.toDouble()) : null,
+      maximumTurbidity: minimumTurbidity <= maximumTurbidity ? new Turbidity.NTU(maximumTurbidity.toDouble()) : null,
       startTime: new Duration(minutes: decodedData['cycleTime']),
       active: decodedData['cycleCompleted'] == 0,
-      duration: new Duration(minutes: decodedData['cycleDurationInMinutes'])
+      duration: new Duration(minutes: cycleNumber << 8 + decodedData['cycleDurationInMinutes'])
     );
     dishwasher.setCycle(_cycle, cycleData, stamp);
   }
