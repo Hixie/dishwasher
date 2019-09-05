@@ -50,9 +50,9 @@ class LogMessage {
   }
 }
 
-void updateDisplay(bool ansiEnabled) {
+void updateDisplay(bool ansiEnabled, { bool force: false }) {
   if (ansiEnabled) {
-    if (dishwasher.isDirty) {
+    if (dishwasher.isDirty || force) {
       stdout.write('\u001B[?25l\u001B[H'); // hide cursor, and move cursor to top left
       printClear('GE GDF570SGFWW dishwasher model');
       printClear('▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔');
@@ -199,6 +199,7 @@ void main(List<String> arguments) {
     readLogs(parsedArguments.rest, ansiEnabled: ansiEnabled);
   }
   print('Log parsing complete.');
+  ProcessSignal.SIGWINCH.watch().forEach((ProcessSignal signal) { updateDisplay(ansiEnabled, force: true); });
   String hubConfiguration = parsedArguments[kHouseHubConfigurationArgument];
   if (parsedArguments[kServerArgument]) {
     startServer(ansiEnabled: ansiEnabled, hubConfiguration: hubConfiguration);
