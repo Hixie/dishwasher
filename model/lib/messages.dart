@@ -16,8 +16,8 @@ bool isWord(dynamic value) => value is int && value >= 0 && value <= 65536;
 abstract class MessageHandler {
   String get name => runtimeType.toString();
   void parse(Dishwasher dishwasher, DateTime stamp, String data);
-  void parseFail() {
-    throw 'Unexpected data from dishwasher.';
+  void parseFail([String message]) {
+    throw 'Unexpected data from dishwasher ($message).';
   }
 }
 
@@ -86,7 +86,7 @@ class UserConfigurationHandler extends MessageHandler {
     }
     int zone = (byte1 & 0x30) >> 4;
     if (zone > 0)
-      parseFail(); // never seen with this dishwasher
+      parseFail('unexpected zone: $zone'); // never seen with this dishwasher
     bool demo = (byte1 & 0x40) > 0;
     bool mute = (byte1 & 0x80) > 0; // press Heated Dry five (?) times in a row to toggle
     bool steam = (byte2 & 0x01) > 0;
@@ -107,7 +107,7 @@ class UserConfigurationHandler extends MessageHandler {
     bool rinseAidEnabled = (byte2 & 0x80) > 0; // press Steam five times in a row to toggle
     bool bottleBlast = (byte3 & 0x01) > 0; // not present on this dishwasher
     if (bottleBlast)
-      parseFail(); // never seen with this dishwasher
+      parseFail('bottle blast unexpectedly enabled'); // never seen with this dishwasher
     UserCycleSelection userCycleSelection;
     switch ((byte3 & 0x1E) >> 1) {
       case 0: userCycleSelection = UserCycleSelection.autosense; break;
@@ -117,11 +117,11 @@ class UserConfigurationHandler extends MessageHandler {
       default: userCycleSelection = UserCycleSelection.autosense; break; // assuming that 4-15 (set remotely) are treated like autosense, but not tested
     }
     bool leakDetect = (byte3 & 0x20) > 0; // no way to toggle with this dishwasher
-    if (!leakDetect)
-      parseFail(); // never seen with this dishwasher
+    // if (!leakDetect)
+    //   parseFail('leak detection unexpectededly disabled'); // never seen with this dishwasher
     bool sabbathMode = (byte3 & 0x40) > 0; // hold start and wash temp buttons for five seconds to toggle
     if ((byte3 & 0x80) > 0)
-      parseFail(); // never seen with this dishwasher
+      parseFail('reserved bit set'); // never seen with this dishwasher
 
     dishwasher.delay = delay;
     // dishwasher.zone = zone;
@@ -134,7 +134,7 @@ class UserConfigurationHandler extends MessageHandler {
     dishwasher.rinseAidEnabled = rinseAidEnabled;
     // dishwasher.bottleBlast = bottleBlast;
     dishwasher.userCycleSelection = userCycleSelection;
-    // dishwasher.leakDetect = leakDetect;
+    dishwasher.leakDetect = leakDetect;
     dishwasher.sabbathMode = sabbathMode;
   }
 }

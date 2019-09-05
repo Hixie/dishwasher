@@ -111,7 +111,7 @@ void updateRemoteModel(String hubConfiguration) {
       case DishwasherStateSummary.running: message = 'dishwasherRunning'; break;
       default: message = 'dishwasherConfused'; break;
     }
-    Socket.connect(hubServer, port).then((Socket socket) {
+    SecureSocket.connect(hubServer, port).then((Socket socket) {
       socket
         ..handleError((e) { print('socket error: $e'); })
         ..encoding = UTF8

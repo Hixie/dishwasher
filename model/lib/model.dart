@@ -790,6 +790,15 @@ class Dishwasher {
     _dirtyUI = true;
   }
 
+  bool get leakDetect => _leakDetect;
+  bool _leakDetect = false;
+  set leakDetect(bool value) {
+    if (_leakDetect == value)
+      return;
+    _leakDetect = value;
+    _dirtyUI = true;
+  }
+
   Set<DishwasherReminders> get reminders => new HashSet<DishwasherReminders>.from(_reminders);
   Set<DishwasherReminders> _reminders = new HashSet<DishwasherReminders>();
   set reminders(Set<DishwasherReminders> value) {
@@ -1018,6 +1027,11 @@ class Dishwasher {
       settings.add('Controls Locked');
     if (sabbathMode)
       settings.add('Sabbath Mode');
+    if (leakDetect) {
+      settings.add('Leak Detection Enabled');
+    } else {
+      settings.add('Leak Detection Disabled');
+    }
     // CURRENT OPERATING MODE AND CYCLE STATE
     // * Operating mode
     final String operatingModeDescription = kOperatingModeDescriptions[operatingMode] ?? 'Unknown operating mode';
@@ -1141,7 +1155,7 @@ class Dishwasher {
       writeln('${index.toString().padLeft(7)}: ${event.toString(epoch: epoch)}');
       index -= 1;
       count += 1;
-      if (count > 20)
+      if (count > 10)
         break;
     }
     writeln('');
