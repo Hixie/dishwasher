@@ -1,0 +1,18 @@
+TODO
+----
+
+- have a command-line option to hide the floating sensors
+- run through all the logs making charts of what the programs are
+- model the current state of the dishwasher better:
+   - use the current states as input to a real "current state" system
+   - consider case:
+      - start cycle
+      - immediately cancel
+      - start cycle
+     this should be considered as three state transitions, right now it's one,
+     because the currently cycle state/step doesn't change in between.
+   - right now we get confused sometimes because we receive the operatingMode
+     later than the cycleState and so e.g. one is still "paused" but the other
+     isn't, and we think it's an inconsistent state.
+- handle SIGWINCH to repaint screen
+- show only as many log lines as fits on the screen
