@@ -1155,7 +1155,7 @@ class Dishwasher {
       writeln('${index.toString().padLeft(7)}: ${event.toString(epoch: epoch)}');
       index -= 1;
       count += 1;
-      if (count > 10)
+      if (count > 135) // TODO(ianh): ideally we'd make this based on the console height
         break;
     }
     writeln('');
