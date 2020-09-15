@@ -30,8 +30,8 @@ class LogMessage {
         return null; // ignore old messages
       final MessageHandler handler = handlers[parts[1]] ?? new DefaultHandler(parts[1]);
       return new LogMessage(stamp, handler, parts[2], messageName: parts[1]);
-    } catch (e) {
-      print('unable to parse: $message');
+    } catch (e, stack) {
+      print('unable to parse: $message (${stack.toString().split("\n").first})');
     }
     return null;
   }
@@ -43,9 +43,9 @@ class LogMessage {
     try {
       dishwasher.lastMessageTimestamp = stamp;  
       handler.parse(dishwasher, stamp, payload);
-    } catch (e) {
+    } catch (e, stack) {
       print('$stamp   $messageName  $payload');
-      print('${ " " * stamp.toString().length }   unable to parse: $e');
+      print('${ " " * stamp.toString().length }   unable to parse: $e (${stack.toString().split("\n").first})');
     }
   }
 }
@@ -114,9 +114,9 @@ void updateRemoteModel(String hubConfiguration) {
     SecureSocket.connect(hubServer, port).then((Socket socket) {
       socket
         ..handleError((e) { print('socket error: $e'); })
-        ..encoding = UTF8
+        ..encoding = utf8
         ..write('$username\x00$password\x00$message\x00\x00\x00')
-        ..flush().then((IOSink sink) {
+        ..flush().then((sink) async {
           socket.close();
         });
     }, onError: (e) { print('error: $e'); });
@@ -153,8 +153,7 @@ void readLogs(List<String> arguments, { bool ansiEnabled: false, bool verbose: f
   print('Loading archived logs...');
   for (String pathName in arguments) {
     final Directory directory = new Directory(pathName);
-    final List<FileSystemEntity> files = directory.listSync();
-    files.removeWhere((FileSystemEntity entry) => entry is! File);
+    final List<File> files = directory.listSync().whereType<File>().toList();
     files.sort((File a, File b) => a.path.compareTo(b.path));
     for (File entry in files) {
       for (String line in entry.readAsLinesSync()) {
@@ -199,7 +198,7 @@ void main(List<String> arguments) {
     readLogs(parsedArguments.rest, ansiEnabled: ansiEnabled);
   }
   print('Log parsing complete.');
-  ProcessSignal.SIGWINCH.watch().forEach((ProcessSignal signal) { updateDisplay(ansiEnabled, force: true); });
+  ProcessSignal.sigwinch.watch().forEach((ProcessSignal signal) { updateDisplay(ansiEnabled, force: true); });
   String hubConfiguration = parsedArguments[kHouseHubConfigurationArgument];
   if (parsedArguments[kServerArgument]) {
     startServer(ansiEnabled: ansiEnabled, hubConfiguration: hubConfiguration);

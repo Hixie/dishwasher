@@ -29,7 +29,7 @@ abstract class IgnoredMessageHandler extends MessageHandler {
 
 abstract class IntHandler<T> extends MessageHandler {
   void parse(Dishwasher dishwasher, DateTime stamp, String data) {
-    dynamic decodedData = JSON.decode(data);
+    dynamic decodedData = json.decode(data);
     verify(decodedData is int);
     setValue(dishwasher, parseValue(decodedData));
   }
@@ -40,7 +40,7 @@ abstract class IntHandler<T> extends MessageHandler {
 
 abstract class BitFieldHandler<T> extends MessageHandler {
   void parse(Dishwasher dishwasher, DateTime stamp, String data) {
-    dynamic decodedData = JSON.decode(data);
+    dynamic decodedData = json.decode(data);
     verify(decodedData is int);
     final Set<T> result = new Set<T>();
     int bits = decodedData;
@@ -68,7 +68,7 @@ class DefaultHandler extends IgnoredMessageHandler {
 
 class UserConfigurationHandler extends MessageHandler {
   void parse(Dishwasher dishwasher, DateTime stamp, String data) {
-    dynamic decodedData = JSON.decode(data);
+    dynamic decodedData = json.decode(data);
     verify(decodedData is List<dynamic>);
     verify(decodedData.length == 3);
     verify(!decodedData.any((dynamic value) => value is! int));
@@ -146,7 +146,7 @@ class CycleDataHandler extends MessageHandler {
   String get name => 'cycleData$_cycle';
 
   void parse(Dishwasher dishwasher, DateTime stamp, String data) {
-    dynamic decodedData = JSON.decode(data);
+    dynamic decodedData = json.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'cycleData$_cycle data not a map');
     dynamic cycleNumber = decodedData['cycleNumber'] ?? 0;
     verify(cycleNumber is int, 'cycleData$_cycle.cycleNumber not a number');
@@ -230,7 +230,7 @@ class CycleStateHandler extends IntHandler<CycleState> {
 
 class CycleStatusHandler extends MessageHandler {
   void parse(Dishwasher dishwasher, DateTime stamp, String data) {
-    dynamic decodedData = JSON.decode(data);
+    dynamic decodedData = json.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'cycleStatus data not a map');
     verify(decodedData['cycleRunning'] is int, 'cycleStatus.cycleRunning not a number');
     verify(decodedData['activeCycle'] is int, 'cycleStatus.activeCycle not a number');
@@ -282,7 +282,7 @@ class RemindersHandler extends BitFieldHandler<DishwasherReminders> {
 
 class CycleCountsHandler extends MessageHandler {
   void parse(Dishwasher dishwasher, DateTime stamp, String data) {
-    dynamic decodedData = JSON.decode(data);
+    dynamic decodedData = json.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'cycleCounts data not a map');
     verify(decodedData['startedCount'] is int, 'cycleCounts.startedCount not a number');
     verify(decodedData['completedCount'] is int, 'cycleCounts.completedCount not a number');
@@ -295,7 +295,7 @@ class CycleCountsHandler extends MessageHandler {
 
 class ErrorsHandler extends MessageHandler {
   void parse(Dishwasher dishwasher, DateTime stamp, String data) {
-    dynamic decodedData = JSON.decode(data);
+    dynamic decodedData = json.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'error data not a map');
     verify(decodedData['errorId'] is int, 'errors.errorId not a number');
     verify(isBit(decodedData['errorState']), 'errors.errorState not a bit');
@@ -305,7 +305,7 @@ class ErrorsHandler extends MessageHandler {
 
 class RatesHandler extends MessageHandler {
   void parse(Dishwasher dishwasher, DateTime stamp, String data) {
-    dynamic decodedData = JSON.decode(data);
+    dynamic decodedData = json.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'rates data not a map');
     verify(decodedData['fillRate'] is int, 'rates.fillRate not a number');
     verify(decodedData['drainRate'] is int, 'rates.drainRate not a number');
@@ -319,7 +319,7 @@ class RatesHandler extends MessageHandler {
 
 class ContinuousCycleHandler extends MessageHandler {
   void parse(Dishwasher dishwasher, DateTime stamp, String data) {
-    dynamic decodedData = JSON.decode(data);
+    dynamic decodedData = json.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'continuousCycle data not a map');
     verify(decodedData['cycleToRun'] is int, 'continuousCycle.cycleToRun not a number');
     verify(decodedData['cyclesRemaining'] is int, 'continuousCycle.cyclesRemaining not a number');
@@ -334,17 +334,17 @@ class ContinuousCycleHandler extends MessageHandler {
 
 class AnalogDataHandler extends MessageHandler {
   void parse(Dishwasher dishwasher, DateTime stamp, String data) {
-    dynamic decodedData = JSON.decode(data);
+    dynamic decodedData = json.decode(data);
     verify(decodedData is List<dynamic>, 'analog data data not a list');
     verify(decodedData.length == 12, 'analog data data not a list of twelve values');
     verify(!decodedData.any((dynamic value) => !isByte(value)), 'analog data data not a list of twelve bytes');
-    dishwasher.sensors = decodedData.map/*<int>*/((dynamic data) => data);
+    dishwasher.sensors = decodedData.map<int>((dynamic data) => data as int);
   }
 }
 
 class DryDrainCountersHandler extends MessageHandler {
   void parse(Dishwasher dishwasher, DateTime stamp, String data) {
-    dynamic decodedData = JSON.decode(data);
+    dynamic decodedData = json.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'dryDrainCounters data not a map');
     verify(decodedData['noDryDrainDetectedCount'] is int, 'dryDrainCounters.noDryDrainDetectedCount not a number');
     verify(decodedData['noDryDrainDetectedMaximumValue'] is int, 'dryDrainCounters.noDryDrainDetectedMaximumValue not a number');
@@ -354,7 +354,7 @@ class DryDrainCountersHandler extends MessageHandler {
 
 class PersonalityHandler extends MessageHandler {
   void parse(Dishwasher dishwasher, DateTime stamp, String data) {
-    dynamic decodedData = JSON.decode(data);
+    dynamic decodedData = json.decode(data);
     verify(decodedData is Map<dynamic, dynamic>, 'personality data not a map');
     verify(decodedData['personality'] is int, 'personality.personality not a number');
     verify(decodedData['source'] is int, 'personality.source not a number');

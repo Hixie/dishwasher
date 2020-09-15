@@ -206,7 +206,7 @@ String describeDuration(Duration duration) {
     result += '${duration.inHours}h ';
     duration -= new Duration(hours: duration.inHours);
   }
-  if (duration.inMinutes > 0 || result != '' || duration == Duration.ZERO) {
+  if (duration.inMinutes > 0 || result != '' || duration == Duration.zero) {
     result += '${duration.inMinutes}m';
     duration -= new Duration(minutes: duration.inMinutes);
   }
@@ -320,7 +320,7 @@ class CycleData extends EventData {
         && minimumTurbidity == null
         && maximumTurbidity == null
         && active
-        && duration == Duration.ZERO;
+        && duration == Duration.zero;
   }
 
   String toString({ DateTime epoch, bool active: false }) {
@@ -341,7 +341,7 @@ class CycleData extends EventData {
     if (minimumTurbidity != null)
       result.add('Turbidity: $minimumTurbidity .. $maximumTurbidity');
     if (active) {
-      if (duration == Duration.ZERO)
+      if (duration == Duration.zero)
         result.add('Just started...');
       else
         result.add('Duration: ${describeDuration(duration)} and counting...');
@@ -1155,7 +1155,7 @@ class Dishwasher {
       writeln('${index.toString().padLeft(7)}: ${event.toString(epoch: epoch)}');
       index -= 1;
       count += 1;
-      if (count > 135) // TODO(ianh): ideally we'd make this based on the console height
+      if (count > 20) // TODO(ianh): ideally we'd make this based on the console height
         break;
     }
     writeln('');
