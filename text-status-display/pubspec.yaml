@@ -6,4 +6,4 @@ dependencies:
 
 dependency_overrides:
   home_automation_tools:
-    path: ../dart-home-automation-tools/
+    path: ../../dart-home-automation-tools/
