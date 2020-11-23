@@ -13,6 +13,7 @@ class Credentials {
   int get databasePort => int.parse(_lines[3], radix: 10);
   String get certificatePath => _lines[4];
   String get buttonProcess => _lines[5];
+  String get leakSensorProcess => _lines[6];
 
   int get _requiredCount => 6;
 }

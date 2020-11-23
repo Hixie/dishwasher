@@ -1,10 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:home_automation_tools/all.dart';
-import 'package:meta/meta.dart';
 
 import 'credentials.dart';
 
@@ -1299,13 +1297,16 @@ class Gauge extends Widget {
 Status status = Status.none;
 DishwasherMode mode = DishwasherMode.unknown;
 int buttons = 0x00;
+bool leaking = true;
 int clock = 0;
 
-enum SelectedHeading { some, empty, error, pause, delay, progress, clean, dirty, fault }
+enum SelectedHeading { leaking, some, empty, error, pause, delay, progress, clean, dirty, fault }
 
 void updateUi(Screen screen) {
   SelectedHeading label;
-  if (buttons == 0x01) {
+  if (leaking) {
+    label = SelectedHeading.leaking;
+  } else if (buttons == 0x01) {
     label = SelectedHeading.some;
   } else if (buttons == 0x02) {
     label = SelectedHeading.empty;
@@ -1336,6 +1337,16 @@ void updateUi(Screen screen) {
         fill: Color.black,
         child: Column(
           children: <Height<Widget>>[
+            if (label == SelectedHeading.leaking)
+              Height.lines(3, Padding(
+                padding: const EdgeInsets.fromLTRB(1, 0, 1, 0),
+                fill: Color.black,
+                child: BigLabel(
+                  text: clock % 2 == 0 ? 'LEAK ' : ' LEAK',
+                  foreground: Color.white,
+                  background: Color.black,
+                ),
+              )),
             if (label == SelectedHeading.some)
               Height.lines(3, Padding(
                 padding: const EdgeInsets.fromLTRB(1, 0, 1, 0),
@@ -1565,7 +1576,7 @@ void main(List<String> arguments) async {
         if (!ui)
           print('buttons: $message');
       },
-      onError: (Object error) {
+      onError: (Object error) async {
         terminate.completeError(error);
       },
     );
@@ -1580,6 +1591,27 @@ void main(List<String> arguments) async {
             remy.pushButtonById('emptiedDishwasher');
             break;
         }
+        if (ui)
+          updateUi(screen);
+      }
+    });
+    ProcessMonitor leakSensorProcess = ProcessMonitor(
+      executable: credentials.leakSensorProcess,
+      onLog: (String message) {
+        if (!ui)
+          print('leak sensor: $message');
+      },
+      onError: (Object error) async {
+        terminate.completeError(error);
+      },
+    );
+    leakSensorProcess.output.listen((int value) {
+      if (value != null) {
+        leaking = value > 0;
+        if (leaking)
+          remy.pushButtonById('leakSensorKitchenSinkDetectingLeak');
+        else
+          remy.pushButtonById('leakSensorKitchenSinkIdle');
         if (ui)
           updateUi(screen);
       }
@@ -1607,6 +1639,7 @@ void main(List<String> arguments) async {
     blink?.cancel();
     screen?.dispose();
     buttonProcess?.dispose();
+    leakSensorProcess?.dispose();
     exit(0);
   }, onError: (error, stack) {
     screen?.dispose();
