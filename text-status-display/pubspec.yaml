@@ -1,0 +1,9 @@
+name: dishwasher_text_status_display
+dependencies:
+  meta: any
+  home_automation_tools:
+    git: git://github.com/Hixie/dart-home-automation-tools.git
+
+dependency_overrides:
+  home_automation_tools:
+    path: ../../dart-home-automation-tools/
