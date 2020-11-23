@@ -1300,7 +1300,7 @@ int buttons = 0x00;
 bool leaking = true;
 int clock = 0;
 
-enum SelectedHeading { leaking, some, empty, error, pause, delay, progress, clean, dirty, fault }
+enum SelectedHeading { leaking, some, empty, error, pause, delay, progress, start, clean, dirty, fault }
 
 void updateUi(Screen screen) {
   SelectedHeading label;
@@ -1318,6 +1318,8 @@ void updateUi(Screen screen) {
     label = SelectedHeading.delay;
   } else if (status.operatingMode == DishwasherOperatingMode.active) {
     label = SelectedHeading.progress;
+  } else if (mode == DishwasherMode.active) {
+    label = SelectedHeading.start;
   } else if (mode == DishwasherMode.clean) {
     label = SelectedHeading.clean;
   } else if (mode == DishwasherMode.dirty) {
@@ -1374,6 +1376,16 @@ void updateUi(Screen screen) {
                 child: BigLabel(
                   text: 'ERROR',
                   foreground: Color.cyan,
+                  background: Color.black,
+                ),
+              )),
+            if (label == SelectedHeading.start)
+              Height.lines(3, Padding(
+                padding: const EdgeInsets.fromLTRB(1, 0, 1, 0),
+                fill: Color.black,
+                child: BigLabel(
+                  text: 'START',
+                  foreground: Color.red,
                   background: Color.black,
                 ),
               )),
