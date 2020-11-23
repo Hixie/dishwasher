@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:typed_data';
 
 import 'box.dart';
 import 'hash_utils.dart';
@@ -391,6 +392,8 @@ class DishwasherError {
   String get errorMessage {
     switch (errorId) {
       case 0: return 'no error';
+      // case 48: ?
+      //  - seen frequently
       case 96: return 'no water in tub'; // experimental error code
       case 97: return 'water was not hot enough for several consecutive cycles in a row';
       // case 99: ?
@@ -571,6 +574,10 @@ typedef void PrintHandler(String message);
 // ==========
 
 class Dishwasher {
+  Dishwasher({ this.onLog });
+
+  final PrintHandler onLog;
+
   bool _dirtyUI = false;
   bool _dirtyLog = false;
   bool _dirtyInternals = false;
@@ -1161,12 +1168,9 @@ class Dishwasher {
     writeln('');
   }
 
-  bool enableNotifications = false;
-
   void notify(String s) {
-    if (enableNotifications) {
-      writeln('$s');
-      writeln('');
+    if (onLog != null) {
+      onLog(s);
     }
   }
 
@@ -1200,5 +1204,93 @@ class Dishwasher {
     _dirtyUI = false;
     printLog();
     _dirtyLog = false;
+  }
+
+  void verifyFits(int value, int bits) {
+    if (value & ~((~0) << bits) < value)
+      throw 'value overflow ($value doesn\'t fit in $bits bits)';
+  }
+
+  int boolToInt(bool value) => value ? 1 : 0;
+
+  ByteData encodeForDatabase() {
+    final ByteData buffer = ByteData(28);
+    int bitsDelay, bitsCycleMode, bitsSteam, bitsRinseAidEnabled, bitsWashTemperature, bitsHeatedDry,
+        bitsUiLocked, bitsMuted, bitsSabbathMode, bitsDemo, bitsLeakDetectEnabled;
+    switch (delay) {
+      case 0: bitsDelay = 0; break;
+      case 2: bitsDelay = 1; break;
+      case 4: bitsDelay = 2; break;
+      case 8: bitsDelay = 3; break;
+      default: throw 'delay cannot be expressed in 2 bits';
+    }
+    bitsCycleMode = userCycleSelection.index;
+    verifyFits(bitsCycleMode, 2);
+    bitsSteam = boolToInt(steam);
+    bitsRinseAidEnabled = boolToInt(rinseAidEnabled);
+    bitsWashTemperature = washTemperature.index;
+    verifyFits(bitsWashTemperature, 2);
+    bitsHeatedDry = dryOptions.index;
+    verifyFits(bitsHeatedDry, 1);
+    bitsUiLocked = boolToInt(uiLocked);
+    bitsMuted = boolToInt(mute);
+    bitsSabbathMode = boolToInt(sabbathMode);
+    bitsDemo = boolToInt(demo);
+    bitsLeakDetectEnabled = boolToInt(leakDetect);
+    buffer.setUint8(0,
+      bitsDelay                     << 0  |
+      bitsCycleMode                 << 2  |
+      bitsSteam                     << 4  |
+      bitsRinseAidEnabled           << 5  |
+      bitsWashTemperature           << 6,
+    );
+    buffer.setUint8(1,
+      bitsHeatedDry                 << 0  |
+      bitsUiLocked                  << 1  |
+      bitsMuted                     << 2  |
+      bitsSabbathMode               << 3  |
+      bitsDemo                      << 4  |
+      bitsLeakDetectEnabled         << 5,
+      // 2 bits reserved
+    );
+    int bitsActualOperatingMode, bitsActualCycleMode, bitsActualCycleState;
+    bitsActualOperatingMode = operatingMode?.index ?? 0x0F;
+    verifyFits(bitsActualOperatingMode, 4);
+    bitsActualCycleMode = cycleSelection?.index ?? 0x07;
+    verifyFits(bitsActualCycleMode, 3);
+    bitsActualCycleState = cycleState?.index ?? 0x0F;
+    verifyFits(bitsActualCycleState, 4);
+    buffer.setUint8(2,
+      bitsActualOperatingMode       << 0 |
+      bitsActualCycleState          << 4,
+    );
+    buffer.setUint8(3,
+      bitsActualCycleMode           << 0,
+      // 5 bits reserved
+    );
+
+    if (cycleStep != null) {
+      buffer.setUint8(4, cycleStep >> kCycle);
+      buffer.setUint8(5, cycleStep & ~((~0) << kCycle));
+    } else {
+      buffer.setUint16(4, 0xFFFF);
+    }
+    buffer.setUint16(6, _mostRecentCycle?.duration?.inMinutes ?? 0xFFFF);
+    
+    buffer.setUint8(8, stepsExecuted);
+    buffer.setUint8(9, stepsEstimated);
+    buffer.setUint8(10, errorState != null ? errorState.active ? errorState.errorId : 0 : 0xFF);
+    // 8 bits reserved
+    buffer.setUint8(12, _mostRecentCycle?.minimumTemperature?.fahrenheit?.round() ?? 0xFF);
+    buffer.setUint8(13, _mostRecentCycle?.maximumTemperature?.fahrenheit?.round() ?? 0xFF);
+    buffer.setUint8(14, _mostRecentCycle?.lastTemperature?.fahrenheit?.round() ?? 0xFF);
+    // 8 bits reserved
+    buffer.setUint16(16, _mostRecentCycle?.minimumTurbidity?.ntu?.round() ?? 0xFFFF);
+    buffer.setUint16(18, _mostRecentCycle?.maximumTurbidity?.ntu?.round() ?? 0xFFFF);
+    buffer.setUint16(20, countOfCyclesStarted ?? 0xFFFF);
+    buffer.setUint16(22, countOfCyclesCompleted ?? 0xFFFF);
+    buffer.setUint16(24, doorCount ?? 0xFFFF);
+    buffer.setUint16(26, powerOnCounter ?? 0xFFFF);
+    return buffer;
   }
 }

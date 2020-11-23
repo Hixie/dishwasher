@@ -4,20 +4,37 @@ import 'dart:io';
 
 import 'package:args/args.dart';
 
+import 'credentials.dart';
+import 'database.dart';
 import 'messages.dart';
 import 'model.dart';
 
-Stopwatch staleness = new Stopwatch();
+Stopwatch staleness = new Stopwatch()..start();
 Timer dirtyTimer;
 
-const Duration kCoallesceDelay = const Duration(milliseconds: 500);
-const Duration kMaxStaleness = const Duration(milliseconds: 3500);
+const Duration kCoallesceDelay = const Duration(milliseconds: 100);
+const Duration kMaxStaleness = const Duration(milliseconds: 250);
 
-final Dishwasher dishwasher = new Dishwasher();
+final Dishwasher dishwasher = new Dishwasher(onLog: (String message) { log('model', message); });
+DatabaseWritingClient database;
 
 enum DishwasherStateSummary { unknown, idle, running }
 
+bool ansiEnabled = false;
 DishwasherStateSummary mostRecentState = DishwasherStateSummary.unknown;
+
+Map<String, List<String>> _log = <String, List<String>>{};
+
+void log(String category, String message) {
+  if (ansiEnabled) {
+    List<String> section = _log.putIfAbsent(category, () => <String>[]);
+    section.add('${DateTime.now().toIso8601String()} $message');
+    if (section.length > 4)
+      section.removeAt(0);
+  } else {
+    print('$category: $message');
+  }
+}
 
 class LogMessage {
   LogMessage(this.stamp, this.handler, this.payload, { this.messageName });
@@ -50,13 +67,18 @@ class LogMessage {
   }
 }
 
-void updateDisplay(bool ansiEnabled, { bool force: false }) {
+void updateDisplay({ bool force: false }) {
   if (ansiEnabled) {
     if (dishwasher.isDirty || force) {
       stdout.write('\u001B[?25l\u001B[H'); // hide cursor, and move cursor to top left
       printClear('GE GDF570SGFWW dishwasher model');
       printClear('▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔');
       dishwasher.printEverything(); // calls printClear below
+      printClear('');
+      for (String category in _log.keys) {
+        for (String message in _log[category])
+          printClear('$category $message');
+      }
       stdout.write('\u001B[J\u001B[?25h'); // clear rest of screen, and show cursor again
     }
   } else {
@@ -69,65 +91,68 @@ void printClear(String lines) {
     stdout.write('$line\u001B[K\n');
 }
 
-void configureDishwasherOutput(Dishwasher dishwasher, bool ansiEnabled) {
+void configureDishwasherOutput(Dishwasher dishwasher) {
   if (ansiEnabled) {
-    dishwasher.enableNotifications = false;
     dishwasher.onPrint = printClear;
   } else {
-    dishwasher.enableNotifications = true;
     dishwasher.onPrint = print;
   }
 }
 
-void handleWebSocketMessage(dynamic message, bool ansiEnabled) {
+void handleWebSocketMessage(dynamic message) {
   if (message is! String)
     return;
+  staleness.start();
   new LogMessage.fromLogLine(message)?.dispatch(dishwasher);
   if (staleness.elapsed > kMaxStaleness) {
-    dirtyTimer?.cancel();
-    dirtyTimer = null;
-    updateDisplay(ansiEnabled);
+    applyUpdates();
   } else {
     dirtyTimer?.cancel();
-    dirtyTimer = new Timer(kCoallesceDelay, () { updateDisplay(ansiEnabled); });
+    dirtyTimer = new Timer(kCoallesceDelay, () {
+      applyUpdates();
+    });
   }
 }
 
-void updateRemoteModel(String hubConfiguration) {
+void applyUpdates() {
+  dirtyTimer?.cancel();
+  dirtyTimer = null;
+  updateDisplay();
+  database?.send(dishwasher.encodeForDatabase().buffer.asUint8List());
+  staleness.reset();
+  staleness.stop();
+}
+
+void updateRemoteModel(Credentials credentials) {
   DishwasherStateSummary oldState = mostRecentState;
   if (dishwasher.isIdle)
     mostRecentState = DishwasherStateSummary.idle;
   else
     mostRecentState = DishwasherStateSummary.running;
   if (oldState != mostRecentState) {
-    final List<String> config = new File(hubConfiguration).readAsLinesSync();
-    final String hubServer = config[0];
-    final int port = int.parse(config[1]);
-    final String username = config[2];
-    final String password = config[3];
     String message;
     switch (mostRecentState) {
       case DishwasherStateSummary.idle: message = 'dishwasherIdle'; break;
       case DishwasherStateSummary.running: message = 'dishwasherRunning'; break;
       default: message = 'dishwasherConfused'; break;
     }
-    SecureSocket.connect(hubServer, port).then((Socket socket) {
+    SecureSocket.connect(credentials.remyHost, credentials.remyPort).then((Socket socket) {
       socket
         ..handleError((e) { print('socket error: $e'); })
         ..encoding = utf8
-        ..write('$username\x00$password\x00$message\x00\x00\x00')
+        ..write('${credentials.remyUsername}\x00${credentials.remyPassword}\x00$message\x00\x00\x00')
         ..flush().then((sink) async {
           socket.close();
         });
-    }, onError: (e) { print('error: $e'); });
+    }, onError: (error) { log('remy', '$error'); });
   }
 }
 
 const int port = 2000;
 
-void startServer({ bool ansiEnabled: false, String hubConfiguration }) {
+void startServer({ Credentials credentials }) {
   print('Starting server...\n');
-  configureDishwasherOutput(dishwasher, ansiEnabled);
+  configureDishwasherOutput(dishwasher);
   HttpServer.bind('127.0.0.1', port)
     .then((HttpServer server) {
       server.listen((HttpRequest request) {
@@ -138,18 +163,18 @@ void startServer({ bool ansiEnabled: false, String hubConfiguration }) {
           }
         ).then((WebSocket websocket) {
           websocket.listen((dynamic message) {
-            handleWebSocketMessage(message, ansiEnabled);
-            if (hubConfiguration != null)
-              updateRemoteModel(hubConfiguration);
+            handleWebSocketMessage(message);
+            if (credentials != null)
+              updateRemoteModel(credentials);
           });
         });
       });
-    }, onError: (error) => print("Error starting server: $error"));
+    }, onError: (error) => log('server', error));
 }
 
 final RegExp logFile = new RegExp(r'^sending to model: (.+)$');
 
-void readLogs(List<String> arguments, { bool ansiEnabled: false, bool verbose: false }) {
+void readLogs(List<String> arguments, { bool verbose: false }) {
   print('Loading archived logs...');
   for (String pathName in arguments) {
     final Directory directory = new Directory(pathName);
@@ -165,7 +190,7 @@ void readLogs(List<String> arguments, { bool ansiEnabled: false, bool verbose: f
               assert(message.stamp.compareTo(dishwasher.lastMessageTimestamp) >= 0);
               if (verbose) {
                 if (message.stamp.difference(dishwasher.lastMessageTimestamp) >= kCoallesceDelay)
-                  updateDisplay(ansiEnabled);
+                  updateDisplay();
               }
             }
             message.dispatch(dishwasher);
@@ -181,7 +206,7 @@ const String kServerArgument = 'server';
 const String kVerboseLogsArgument = 'show-logs';
 const String kHouseHubConfigurationArgument = 'hub-config';
 
-void main(List<String> arguments) {
+void main(List<String> arguments) async {
   print('GE GDF570SGFWW dishwasher model');
   print('▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔');
   final ArgParser parser = new ArgParser()
@@ -190,21 +215,43 @@ void main(List<String> arguments) {
     ..addFlag(kVerboseLogsArgument, help: 'Show updates when parsing logs.', defaultsTo: false)
     ..addOption(kHouseHubConfigurationArgument, help: 'Configuration file for a house hub to which to forward information (when server enabled).');
   final ArgResults parsedArguments = parser.parse(arguments);
-  final bool ansiEnabled = parsedArguments[kColorArgument];
+  final String hubConfiguration = parsedArguments[kHouseHubConfigurationArgument];
+  Credentials credentials;
+  InternetAddress databaseHost;
+  SecurityContext securityContext;
+  if (hubConfiguration != null) {
+    credentials = Credentials(hubConfiguration);
+    securityContext = SecurityContext()..setTrustedCertificatesBytes(File(credentials.certificatePath).readAsBytesSync());
+    List<InternetAddress> databaseHosts = await InternetAddress.lookup(credentials.databaseHost);
+    if (databaseHosts.isEmpty) {
+      print('Could not look up ${credentials.databaseHost}');
+      exit(1);
+    }
+    databaseHost = databaseHosts.first;
+  }
   if (parsedArguments[kVerboseLogsArgument]) {
-    configureDishwasherOutput(dishwasher, ansiEnabled);
-    readLogs(parsedArguments.rest, ansiEnabled: ansiEnabled, verbose: true);
+    configureDishwasherOutput(dishwasher);
+    readLogs(parsedArguments.rest, verbose: true);
   } else {
-    readLogs(parsedArguments.rest, ansiEnabled: ansiEnabled);
+    readLogs(parsedArguments.rest);
   }
   print('Log parsing complete.');
-  ProcessSignal.sigwinch.watch().forEach((ProcessSignal signal) { updateDisplay(ansiEnabled, force: true); });
-  String hubConfiguration = parsedArguments[kHouseHubConfigurationArgument];
+  if (parsedArguments[kColorArgument])
+    ansiEnabled = true;
+  ProcessSignal.sigwinch.watch().forEach((ProcessSignal signal) { updateDisplay(force: true); });
+  if (databaseHost != null) {
+    database = new DatabaseWritingClient(
+      databaseHost,
+      credentials.databasePort,
+      securityContext,
+      credentials.databasePassword,
+      onLog: (String message) { log('database', message); },
+    );
+  }
   if (parsedArguments[kServerArgument]) {
-    startServer(ansiEnabled: ansiEnabled, hubConfiguration: hubConfiguration);
+    startServer(credentials: credentials);
   } else {
-    configureDishwasherOutput(dishwasher, ansiEnabled);
+    configureDishwasherOutput(dishwasher);
     dishwasher.printEverything();
   }
 }
-
