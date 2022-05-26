@@ -1294,13 +1294,15 @@ class Gauge extends Widget {
 }
 
 
+enum DishwasherMode { dirty, abort, active, clean, unknown }
+
 Status status = Status.none;
 DishwasherMode mode = DishwasherMode.unknown;
 int buttons = 0x00;
 bool leaking = true;
 int clock = 0;
 
-enum SelectedHeading { leaking, some, empty, error, pause, delay, progress, start, clean, dirty, fault }
+enum SelectedHeading { leaking, some, empty, error, pause, delay, progress, start, clean, abort, dirty, fault }
 
 void updateUi(Screen screen) {
   SelectedHeading label;
@@ -1322,6 +1324,8 @@ void updateUi(Screen screen) {
     label = SelectedHeading.start;
   } else if (mode == DishwasherMode.clean) {
     label = SelectedHeading.clean;
+  } else if (mode == DishwasherMode.abort) {
+    label = SelectedHeading.abort;
   } else if (mode == DishwasherMode.dirty) {
     label = SelectedHeading.dirty;
   } else {
@@ -1396,6 +1400,16 @@ void updateUi(Screen screen) {
                 child: BigLabel(
                   text: 'CLEAN',
                   foreground: Color.green,
+                  background: Color.black,
+                ),
+              )),
+            if (label == SelectedHeading.abort)
+              Height.lines(3, Padding(
+                padding: const EdgeInsets.fromLTRB(1, 0, 1, 0),
+                fill: Color.black,
+                child: BigLabel(
+                  text: 'ABORT',
+                  foreground: Color.red,
                   background: Color.black,
                 ),
               )),
@@ -1572,6 +1586,9 @@ void main(List<String> arguments) async {
         case 'clean':
           mode = DishwasherMode.clean;
           break;
+        case 'abort':
+          mode = DishwasherMode.abort;
+          break;
         case 'dirty':
           mode = DishwasherMode.dirty;
           break;
@@ -1620,10 +1637,14 @@ void main(List<String> arguments) async {
     leakSensorProcess.output.listen((int value) {
       if (value != null) {
         leaking = value > 0;
-        if (leaking)
+        if (value & 0x01 > 0)
           remy.pushButtonById('leakSensorKitchenSinkDetectingLeak');
         else
           remy.pushButtonById('leakSensorKitchenSinkIdle');
+        if (value & 0x02 > 0)
+          remy.pushButtonById('leakSensorDishwasherDetectingLeak');
+        else
+          remy.pushButtonById('leakSensorDishwasherIdle');
         if (ui)
           updateUi(screen);
       }
