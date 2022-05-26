@@ -18,7 +18,7 @@ const Duration kMaxStaleness = const Duration(milliseconds: 250);
 final Dishwasher dishwasher = new Dishwasher(onLog: (String message) { log('model', message); });
 DatabaseWritingClient database;
 
-enum DishwasherStateSummary { unknown, idle, running }
+enum DishwasherStateSummary { unknown, idle, running, aborted }
 
 bool ansiEnabled = false;
 DishwasherStateSummary mostRecentState = DishwasherStateSummary.unknown;
@@ -125,25 +125,33 @@ void applyUpdates() {
 
 void updateRemoteModel(Credentials credentials) {
   DishwasherStateSummary oldState = mostRecentState;
-  if (dishwasher.isIdle)
+  if (dishwasher.isIdle) {
     mostRecentState = DishwasherStateSummary.idle;
-  else
+  } else if (dishwasher.isAborted) {
+    mostRecentState = DishwasherStateSummary.aborted;
+  } else {
     mostRecentState = DishwasherStateSummary.running;
+  }
   if (oldState != mostRecentState) {
     String message;
     switch (mostRecentState) {
-      case DishwasherStateSummary.idle: message = 'dishwasherIdle'; break;
       case DishwasherStateSummary.running: message = 'dishwasherRunning'; break;
+      case DishwasherStateSummary.aborted: message = 'dishwasherAborted'; break;
+      case DishwasherStateSummary.idle: message = 'dishwasherIdle'; break;
       default: message = 'dishwasherConfused'; break;
     }
     SecureSocket.connect(credentials.remyHost, credentials.remyPort).then((Socket socket) {
-      socket
-        ..handleError((e) { print('socket error: $e'); })
-        ..encoding = utf8
-        ..write('${credentials.remyUsername}\x00${credentials.remyPassword}\x00$message\x00\x00\x00')
-        ..flush().then((sink) async {
-          socket.close();
-        });
+      try {
+        socket
+          ..handleError((error) { log('remy', '$error'); })
+          ..encoding = utf8
+          ..write('${credentials.remyUsername}\x00${credentials.remyPassword}\x00$message\x00\x00\x00')
+          ..flush().then((sink) async {
+            socket.close();
+          });
+      } catch (error) {
+        log('remy', '$error');
+      }
     }, onError: (error) { log('remy', '$error'); });
   }
 }

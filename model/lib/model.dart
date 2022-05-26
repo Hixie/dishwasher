@@ -1007,7 +1007,8 @@ class Dishwasher {
 
   bool get isRunning => operatingMode == OperatingMode.active;
   bool get isPaused => operatingMode == OperatingMode.pause;
-  bool get isIdle => !isRunning && !isPaused;
+  bool get isAborted => kInactiveOperatingModes.contains(operatingMode) && cycleSelection != CycleSelection.none;
+  bool get isIdle => !isRunning && !isPaused && !isAborted;
 
   static final _uiBox = new SingleLineBox();
   void printInterface() {
