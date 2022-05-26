@@ -1557,6 +1557,29 @@ void signalEnd([Object value]) {
   }
 }
 
+Set<String> alerting = <String>{};
+Timer alertReset;
+
+void reportLeak(RemyMultiplexer remy, bool leaking, String sensor) {
+  if (leaking) {
+    remy.pushButtonById('leakSensor${sensor}DetectingLeak');
+    if (!alerting.contains(sensor)) {
+      alertReset?.cancel();
+      alertReset = Timer(const Duration(seconds: 15), () {
+        alertReset = null;
+        for (String sensor in alerting) {
+          remy.pushButtonById('leakSensor${sensor}Idle');
+        }
+        alerting.clear();
+      });
+    }
+    alerting.add(sensor);
+  } else {
+    remy.pushButtonById('leakSensor${sensor}Idle');
+    alerting.remove(sensor);
+  }
+}
+
 void main(List<String> arguments) async {
   bool ui = true;
   if (arguments.isNotEmpty && arguments.contains('--debug'))
@@ -1637,14 +1660,8 @@ void main(List<String> arguments) async {
     leakSensorProcess.output.listen((int value) {
       if (value != null) {
         leaking = value > 0;
-        if (value & 0x01 > 0)
-          remy.pushButtonById('leakSensorKitchenSinkDetectingLeak');
-        else
-          remy.pushButtonById('leakSensorKitchenSinkIdle');
-        if (value & 0x02 > 0)
-          remy.pushButtonById('leakSensorDishwasherDetectingLeak');
-        else
-          remy.pushButtonById('leakSensorDishwasherIdle');
+        reportLeak(remy, value & 0x01 > 0, 'KitchenSink');
+        reportLeak(remy, value & 0x02 > 0, 'Dishwasher');
         if (ui)
           updateUi(screen);
       }
