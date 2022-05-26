@@ -1043,7 +1043,7 @@ class Dishwasher {
     // CURRENT OPERATING MODE AND CYCLE STATE
     // * Operating mode
     final String operatingModeDescription = kOperatingModeDescriptions[operatingMode] ?? 'Unknown operating mode';
-    assert(isIdle || isRunning || isPaused);
+    assert(isIdle || isRunning || isAborted || isPaused);
     // * Cycle selection
     final String cycleSelectionDescription = kCycleSelectionDescriptions[cycleSelection] ?? 'unknown cycle selection';
     // * Cycle state
@@ -1052,13 +1052,14 @@ class Dishwasher {
     final String cycleStepDescription = describeCycleStep(cycleStep);
     // BOX
     String modeUI;
-    if (isIdle) {
+    if (isIdle || isAborted) {
       if (cycleState != CycleState.none) {
         modeUI = 'INCONSISTENT STATE • $operatingModeDescription • $cycleSelectionDescription • $cycleStateDescription • $cycleStepDescription';
       } else if (!kEndOfCycleStates.contains(cycleStep)) {
         if (operatingMode == OperatingMode.endOfCycle) {
           modeUI = '$operatingModeDescription • $cycleSelectionDescription • $cycleStepDescription';
         } else if (kInactiveOperatingModes.contains(operatingMode)) {
+          assert(isAborted);
           if (cycleSelection != CycleSelection.none) {
             modeUI = '$operatingModeDescription • aborted cycle • $cycleSelectionDescription • $cycleStepDescription';
           } else {
